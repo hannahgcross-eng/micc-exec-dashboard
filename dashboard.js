@@ -1666,8 +1666,10 @@ function buildTable(tblId, rows, cols, expandable=false) {
   const thead = document.createElement('thead');
   const trH = document.createElement('tr');
   cols.forEach(c => {
-    const th = document.createElement('th'); th.textContent = c.h;
+    const th = document.createElement('th');
+    th.innerHTML = `${c.h}<span class="sort-ind"></span>`;
     if (c.cls && c.cls.indexOf('num') >= 0) th.classList.add('num');
+    th.style.cursor='pointer'; th.style.userSelect='none';
     th.addEventListener('click', () => sortTable(tblId, rows, cols, c.k, t));
     trH.appendChild(th);
   });
@@ -1700,6 +1702,11 @@ function sortTable(tblId, rows, cols, key, t) {
     const va = a[key], vb = b[key];
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
     return String(va||'').localeCompare(String(vb||'')) * dir;
+  });
+  // Update sort indicators
+  t.querySelectorAll('thead th').forEach((th, i) => {
+    const ind = th.querySelector('.sort-ind');
+    if (ind) ind.textContent = (cols[i] && cols[i].k === key) ? (dir === -1 ? ' ▼' : ' ▲') : '';
   });
   // re-render body
   const oldTbody = t.querySelector('tbody');
@@ -2001,8 +2008,10 @@ function buildTableWithExpand(tblId, rows, cols, expandBuilder) {
   const thead = document.createElement('thead');
   const trH = document.createElement('tr');
   cols.forEach(c => {
-    const th = document.createElement('th'); th.textContent = c.h;
+    const th = document.createElement('th');
+    th.innerHTML = `${c.h}<span class="sort-ind"></span>`;
     if (c.cls && c.cls.indexOf('num') >= 0) th.classList.add('num');
+    th.style.cursor='pointer'; th.style.userSelect='none';
     th.addEventListener('click', () => sortGenericTable(rows, cols, c.k, t, expandBuilder));
     trH.appendChild(th);
   });
@@ -2039,6 +2048,11 @@ function sortGenericTable(rows, cols, key, t, expandBuilder) {
     const va = a[key], vb = b[key];
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
     return String(va||'').localeCompare(String(vb||'')) * dir;
+  });
+  // Update sort indicators
+  t.querySelectorAll('thead th').forEach((th, i) => {
+    const ind = th.querySelector('.sort-ind');
+    if (ind) ind.textContent = (cols[i] && cols[i].k === key) ? (dir === -1 ? ' ▼' : ' ▲') : '';
   });
   const oldTbody = t.querySelector('tbody');
   const newTbody = document.createElement('tbody');
@@ -2532,36 +2546,67 @@ function renderDrillModal() {
   }
 }
 
-// ── Drill table builder (clickable rows navigate deeper) ─────────────────────
+// ── Drill table builder — sortable columns + optional row drill ───────────────
 function buildDrillTable(id, rows, cols, onRowClick) {
+  const localSort = { key: null, dir: -1 };
   const wrap = document.createElement('div'); wrap.className = 'drill-tbl-wrap';
-  const tbl = document.createElement('table'); tbl.className = 'tbl'; tbl.id = id;
-  const thead = document.createElement('thead'); const trH = document.createElement('tr');
+  const tbl  = document.createElement('table'); tbl.className = 'tbl'; tbl.id = id;
+  const thead = document.createElement('thead');
+  const trH   = document.createElement('tr');
+
+  const rebuildBody = () => {
+    const tbody = document.createElement('tbody');
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      if (onRowClick) tr.className = 'drill-row';
+      cols.forEach(c => {
+        const td = document.createElement('td'); if (c.cls) td.className = c.cls;
+        const v = r[c.k]; const html = c.fmt ? c.fmt(v) : (v == null ? '' : String(v));
+        if (html && /<[a-z]/i.test(String(html))) td.innerHTML = html; else td.textContent = html;
+        tr.appendChild(td);
+      });
+      if (onRowClick) {
+        const arrowTd = document.createElement('td');
+        arrowTd.className = 'drill-arrow'; arrowTd.textContent = '›';
+        tr.appendChild(arrowTd);
+        tr.addEventListener('click', () => onRowClick(r));
+      }
+      tbody.appendChild(tr);
+    });
+    const old = tbl.querySelector('tbody');
+    if (old) old.replaceWith(tbody); else tbl.appendChild(tbody);
+  };
+
   cols.forEach(c => {
-    const th = document.createElement('th'); th.textContent = c.h;
+    const th = document.createElement('th');
+    th.innerHTML = `${c.h}<span class="sort-ind"></span>`;
     if (c.cls && c.cls.includes('num')) th.classList.add('num');
+    th.style.cursor = 'pointer'; th.style.userSelect = 'none';
+    th.addEventListener('click', () => {
+      const dir = localSort.key === c.k ? -localSort.dir : -1;
+      localSort.key = c.k; localSort.dir = dir;
+      rows.sort((a, b) => {
+        const va = a[c.k], vb = b[c.k];
+        if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+        return String(va || '').localeCompare(String(vb || '')) * dir;
+      });
+      trH.querySelectorAll('.sort-ind').forEach(s => s.textContent = '');
+      th.querySelector('.sort-ind').textContent = dir === -1 ? ' ▼' : ' ▲';
+      rebuildBody();
+      // Re-wire export button with current sort
+      const expBtn = document.getElementById('modalExportBtn');
+      if (expBtn && expBtn.style.display !== 'none') {
+        const curTbl = document.getElementById(id);
+        if (curTbl) expBtn.onclick = () => downloadCSV(tableToCSV(curTbl), safeFilename(id) + '.csv');
+      }
+    });
     trH.appendChild(th);
   });
+
   if (onRowClick) trH.insertAdjacentHTML('beforeend', '<th style="width:28px"></th>');
   thead.appendChild(trH); tbl.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    if (onRowClick) tr.className = 'drill-row';
-    cols.forEach(c => {
-      const td = document.createElement('td'); if (c.cls) td.className = c.cls;
-      const v = r[c.k]; const html = c.fmt ? c.fmt(v) : (v == null ? '' : String(v));
-      if (html && /<[a-z]/i.test(html)) td.innerHTML = html; else td.textContent = html;
-      tr.appendChild(td);
-    });
-    if (onRowClick) {
-      const arrowTd = document.createElement('td'); arrowTd.className = 'drill-arrow'; arrowTd.textContent = '›';
-      tr.appendChild(arrowTd);
-      tr.addEventListener('click', () => onRowClick(r));
-    }
-    tbody.appendChild(tr);
-  });
-  tbl.appendChild(tbody); wrap.appendChild(tbl);
+  rebuildBody();
+  wrap.appendChild(tbl);
   return wrap;
 }
 
