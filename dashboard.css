@@ -542,6 +542,49 @@ tr.drill-row:hover td.drill-arrow{color:var(--primary)}
 .gp-sub{font-size:11.5px;color:var(--text-mute)}
 .gp-cache-note{font-size:11px;color:var(--text-mute);font-style:italic;max-width:380px;line-height:1.5}
 
+/* ============== PRODUCT PORTFOLIO DISTRIBUTION ============== */
+.pd-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.pd-header-left h3{font-size:13.5px;font-weight:700;color:var(--text);margin-bottom:2px}
+.pd-header-left .descr{font-size:11.5px;color:var(--text-mute)}
+.pd-toggle-group{
+  display:inline-flex;background:var(--surface-2);
+  border:1px solid var(--border-2);border-radius:8px;padding:3px;gap:2px;flex-shrink:0;
+}
+.pd-toggle{
+  padding:6px 13px;font-size:11.5px;font-weight:600;color:var(--text-2);
+  border-radius:6px;background:transparent;transition:all .15s;white-space:nowrap;
+}
+.pd-toggle:hover{color:var(--text);background:rgba(26,41,182,0.06)}
+.pd-toggle.active{background:var(--primary);color:#fff;box-shadow:0 1px 3px rgba(26,41,182,0.22)}
+.pd-filter-row{
+  display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;
+  margin-bottom:8px;
+}
+.pd-filter-group{display:flex;flex-direction:column;gap:3px}
+.pd-filter-group label{font-size:10.5px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:.5px}
+.pd-filter-group select{
+  padding:6px 10px;font-size:12.5px;
+  border:1px solid var(--border-2);border-radius:6px;
+  background:var(--surface);color:var(--text);min-width:200px;cursor:pointer;
+}
+.pd-filter-group select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(26,41,182,0.12)}
+.pd-context{
+  display:flex;flex-wrap:wrap;gap:12px;
+  font-size:11.5px;color:var(--text-mute);margin-bottom:8px;
+  padding:7px 10px;background:var(--surface-2);border-radius:6px;
+}
+.pd-context b{color:var(--text);font-weight:600}
+.pd-chart-wrap{position:relative;height:480px;width:100%;margin-bottom:10px}
+.pd-method{
+  padding:9px 13px;background:var(--surface-2);
+  border-left:3px solid var(--primary-light);border-radius:4px;
+  font-size:11.5px;color:var(--text-mute);line-height:1.55;margin-top:8px;
+}
+.pd-method b{color:var(--text)}
+.pd-click-hint{
+  font-size:11px;color:var(--text-mute);font-style:italic;margin-top:4px;
+}
+
 /* ============== OUTLET MAP TOGGLE ============== */
 .outlet-card-head{
   display:flex;justify-content:space-between;align-items:flex-start;

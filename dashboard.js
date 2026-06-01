@@ -237,6 +237,7 @@ const state = {
   currentAssets: [],
   outletLeafletMap: null,
   currentOutletList: [],
+  pd: { view: 'breakdown-rev', productFilter: '__all__' },
   thresholds: {
     moq: 0,
     mov: 250,
@@ -1201,6 +1202,12 @@ function renderTopDistributorsByMissedRev(rows) {
     options: {
       indexAxis: 'y',
       responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const dist = sorted[els[0].index]?.[0];
+        if (dist) openMetricDrillAt('missedRev', dist, getRowsForMonths(state.primaryMonths), getAssetRows());
+      },
       plugins: {
         legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
         tooltip: {
@@ -1267,6 +1274,12 @@ function renderEmptyShelfChart(primary, comparison, assets) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const dist = arr[els[0].index]?.dist;
+        if (dist) openMetricDrillAt('emptySoS', dist, getRowsForMonths(state.primaryMonths), getAssetRows());
+      },
       plugins: {
         legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
         tooltip: {
@@ -1343,6 +1356,12 @@ function renderFSOSChart(assets, rows) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const dist = arr[els[0].index]?.dist;
+        if (dist) openMetricDrillAt('foreignSoS', dist, getRowsForMonths(state.primaryMonths), getAssetRows());
+      },
       plugins: {
         legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
         tooltip: {
@@ -1779,59 +1798,230 @@ function toggleExpand(tr, r) {
   tr.parentNode.insertBefore(expRow, tr.nextSibling);
 }
 
-/* ---------- 17. Top 10 products by avg OOS days ---------- */
+/* ---------- 17. Product Portfolio Distribution Analysis ---------- */
+
+function buildProductAggregates(moRows) {
+  const allOutlets = new Set(moRows.map(r => r.outletCode || r.outlet).filter(Boolean));
+  const totalOutlets = allOutlets.size || 1;
+  const byProd = new Map();
+  for (const r of moRows) {
+    if (!r.product) continue;
+    if (!byProd.has(r.product)) byProd.set(r.product, { product:r.product, outlets:new Set(), cRev:0, cUnits:0, mRev:0, mUnits:0 });
+    const p = byProd.get(r.product);
+    p.outlets.add(r.outletCode || r.outlet);
+    p.cRev   += r.actualRev;
+    p.cUnits += r.unitsSold;
+    p.mRev   += r.missedRev;
+    p.mUnits += r.missedUnits;
+  }
+  const out = [];
+  byProd.forEach(p => {
+    const oc = p.outlets.size;
+    const distPct = oc / totalOutlets;
+    const potRevPer   = oc > 0 ? (p.cRev   + p.mRev  ) / oc : 0;
+    const potUnitsPer = oc > 0 ? (p.cUnits + p.mUnits) / oc : 0;
+    const undist = Math.max(0, totalOutlets - oc);
+    out.push({ product:p.product, outletsCarrying:oc, totalOutlets, distPct,
+      currentRev:p.cRev, currentUnits:p.cUnits, missedOOSRev:p.mRev, missedOOSUnits:p.mUnits,
+      missedDistRev: potRevPer*undist, missedDistUnits: potUnitsPer*undist });
+  });
+  return out;
+}
+
 function renderTPC(rows) {
   const el = document.getElementById('tpcCard');
   if (!el) return;
 
+  // Populate product filter dropdown (preserve existing selection)
+  const existingSel = el.querySelector('#pdProductFilter');
+  const prevFilter = existingSel ? existingSel.value : '__all__';
+
+  const aggregates = buildProductAggregates(rows);
+  const allProducts = aggregates.map(a => a.product).sort((a,b) => a.localeCompare(b));
+
   el.innerHTML = `
-    <div class="card-head">
-      <div>
-        <h3>Top 10 products — Avg OOS days</h3>
-        <div class="descr">Top sellers by units sold · color = severity (green &lt;5d · orange 5–10d · red &gt;10d)</div>
+    <div class="pd-header">
+      <div class="pd-header-left">
+        <h3>Product Portfolio Distribution Analysis</h3>
+        <div class="descr">Identify priority SKUs by sales volume and distribution gaps · click any bar to drill in</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="pd-toggle-group" id="pdToggleGroup">
+          <button class="pd-toggle${state.pd.view==='breakdown-rev'?' active':''}" data-pd="breakdown-rev">Breakdown $</button>
+          <button class="pd-toggle${state.pd.view==='breakdown-units'?' active':''}" data-pd="breakdown-units">Breakdown #</button>
+          <button class="pd-toggle${state.pd.view==='potential-rev'?' active':''}" data-pd="potential-rev">Potential $</button>
+          <button class="pd-toggle${state.pd.view==='potential-units'?' active':''}" data-pd="potential-units">Potential #</button>
+        </div>
+        <button class="tbl-export-btn" id="pdExportBtn">⬇ CSV</button>
       </div>
     </div>
-    <div id="topOosWrap"></div>
+    <div class="pd-filter-row">
+      <div class="pd-filter-group">
+        <label>Product filter</label>
+        <select id="pdProductFilter">
+          <option value="__all__">Top 20 by volume</option>
+          ${allProducts.map(p=>`<option value="${p.replace(/"/g,'&quot;')}"${p===prevFilter?' selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="pd-context" id="pdContext"></div>
+    <div class="pd-chart-wrap"><canvas id="pdChart"></canvas></div>
+    <div class="pd-method" id="pdMethod"></div>
   `;
 
-  const wrap = document.getElementById('topOosWrap');
-  if (!rows.length) {
-    wrap.innerHTML = '<div class="empty-state">No Missed Opportunity data in selected scope.</div>';
-    return;
-  }
-
-  const byProduct = {};
-  rows.forEach(r => {
-    if (!byProduct[r.product]) byProduct[r.product] = { brand: r.brand, unitsSold: 0, oosDaysSum: 0, n: 0, missedRev: 0 };
-    byProduct[r.product].unitsSold  += r.unitsSold;
-    byProduct[r.product].oosDaysSum += r.oosDays;
-    byProduct[r.product].n          += 1;
-    byProduct[r.product].missedRev  += r.missedRev;
+  // Wire up toggle buttons
+  el.querySelectorAll('.pd-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.pd.view = btn.dataset.pd;
+      el.querySelectorAll('.pd-toggle').forEach(b => b.classList.toggle('active', b===btn));
+      pdRefreshChart(rows, aggregates);
+    });
   });
 
-  const top10 = Object.entries(byProduct)
-    .map(([p, v]) => ({ product: p, brand: v.brand, unitsSold: v.unitsSold, avgOosDays: v.oosDaysSum / v.n, missedRev: v.missedRev }))
-    .sort((a, b) => b.unitsSold - a.unitsSold)
-    .slice(0, 10);
+  // Wire up product filter
+  el.querySelector('#pdProductFilter').addEventListener('change', e => {
+    state.pd.productFilter = e.target.value;
+    pdRefreshChart(rows, aggregates);
+  });
 
-  const maxOos = Math.max(...top10.map(p => p.avgOosDays), 1);
+  // Wire up CSV export
+  el.querySelector('#pdExportBtn').addEventListener('click', () => pdExportCSV(rows, aggregates));
 
-  wrap.innerHTML = top10.map((p, i) => {
-    const barPct = (p.avgOosDays / maxOos) * 100;
-    const color = p.avgOosDays >= 10 ? 'var(--red)' : p.avgOosDays >= 5 ? 'var(--orange)' : 'var(--green)';
-    const shortName = p.product.length > 34 ? p.product.slice(0, 32) + '…' : p.product;
-    return `
-      <div class="oos-row">
-        <div class="oos-rank">${i + 1}</div>
-        <div class="oos-name" title="${p.product}">${shortName}</div>
-        <div class="oos-bar-wrap">
-          <div class="oos-bar" style="width:${barPct.toFixed(1)}%;background:${color}"></div>
-        </div>
-        <div class="oos-val" style="color:${color}">${fmtNum(p.avgOosDays, 1)}d</div>
-        <div class="oos-miss muted">${fmtMoney(p.missedRev)}</div>
-      </div>`;
-  }).join('');
+  pdRefreshChart(rows, aggregates);
 }
+
+function pdGetDisplayRows(aggregates) {
+  const isPotential = state.pd.view.startsWith('potential');
+  const isRevenue   = state.pd.view.endsWith('rev');
+  const pf = state.pd.productFilter;
+
+  if (pf && pf !== '__all__') {
+    return aggregates.filter(r => r.product === pf);
+  }
+  const sortKey = r => isPotential
+    ? (isRevenue ? r.currentRev+r.missedOOSRev+r.missedDistRev : r.currentUnits+r.missedOOSUnits+r.missedDistUnits)
+    : (isRevenue ? r.currentRev+r.missedOOSRev : r.currentUnits+r.missedOOSUnits);
+  let eligible = aggregates.filter(r => sortKey(r) > 0);
+  if (isPotential) eligible = eligible.filter(r => r.distPct >= 0.05);
+  return eligible.sort((a,b) => sortKey(b)-sortKey(a)).slice(0, 20);
+}
+
+function pdRefreshChart(moRows, aggregates) {
+  const displayRows = pdGetDisplayRows(aggregates);
+  pdRenderContext(moRows, aggregates, displayRows);
+  pdRenderMethodology();
+  pdRenderChart(displayRows, moRows);
+}
+
+function pdRenderContext(moRows, aggregates, displayRows) {
+  const el = document.getElementById('pdContext'); if (!el) return;
+  const isPotential = state.pd.view.startsWith('potential');
+  const isRevenue   = state.pd.view.endsWith('rev');
+  const totalOutlets = new Set(moRows.map(r=>r.outletCode||r.outlet).filter(Boolean)).size;
+  const pf = state.pd.productFilter;
+  el.innerHTML = `
+    <span><b>Showing:</b> ${pf && pf!=='__all__' ? '1 product' : `Top ${displayRows.length} products`}</span>
+    <span><b>Products in dataset:</b> ${aggregates.length.toLocaleString()}</span>
+    <span><b>Outlets in scope:</b> ${totalOutlets.toLocaleString()}</span>
+    <span><b>Metric:</b> ${isRevenue?'Revenue ($)':'Units'} · ${isPotential?'Full Potential':'Existing Stores Only'}</span>`;
+}
+
+function pdRenderMethodology() {
+  const el = document.getElementById('pdMethod'); if (!el) return;
+  const isPotential = state.pd.view.startsWith('potential');
+  const isRevenue   = state.pd.view.endsWith('rev');
+  const m = isRevenue ? 'Revenue' : 'Units';
+  el.innerHTML = isPotential
+    ? `<b>Full Distribution Potential — ${m}.</b> Stacked bars: (1) current ${m.toLowerCase()} from outlets carrying the SKU, (2) OOS-missed ${m.toLowerCase()} at those outlets (Playbook Missed Revenue field), (3) simulated missed ${m.toLowerCase()} from outlets not yet carrying the SKU (avg-per-carrying-outlet × non-carrying outlets). Line = distribution % across outlets in scope. Products must have ≥5% distribution to qualify in ranking.`
+    : `<b>Distribution Breakdown — ${m}.</b> Stacked bars: (1) current ${m.toLowerCase()} from outlets carrying the SKU, (2) OOS-missed ${m.toLowerCase()} (Playbook Missed Revenue field). Line = distribution % across outlets in scope. Existing stores only — no simulation.`;
+}
+
+function pdRenderChart(displayRows, moRows) {
+  destroyChart('pdChart');
+  const canvas = document.getElementById('pdChart'); if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const isPotential = state.pd.view.startsWith('potential');
+  const isRevenue   = state.pd.view.endsWith('rev');
+
+  const datasets = [
+    { type:'bar', label: isRevenue?'Current Revenue':'Units Sold',
+      data: displayRows.map(r => isRevenue?r.currentRev:r.currentUnits),
+      backgroundColor:'#1A29B6', stack:'sales', yAxisID:'y', order:2, borderRadius:0 },
+    { type:'bar', label: isRevenue?'Missed OOS Revenue':'Missed OOS Units',
+      data: displayRows.map(r => isRevenue?r.missedOOSRev:r.missedOOSUnits),
+      backgroundColor:'rgba(255,255,255,0.85)', borderColor:'#1A29B6', borderWidth:1.5,
+      stack:'sales', yAxisID:'y', order:2, borderRadius:0 },
+  ];
+  if (isPotential) {
+    datasets.push({ type:'bar', label: isRevenue?'Missed Distribution Revenue':'Missed Distribution Units',
+      data: displayRows.map(r => isRevenue?r.missedDistRev:r.missedDistUnits),
+      backgroundColor:'#FF8500', stack:'sales', yAxisID:'y', order:2, borderRadius:0 });
+  }
+  datasets.push({ label:'Distribution %', type:'line',
+    data: displayRows.map(r => r.distPct*100),
+    borderColor:'#041328', backgroundColor:'rgba(4,19,40,0.04)',
+    borderWidth:2, pointRadius:3, pointHoverRadius:5,
+    pointBackgroundColor:'#041328', pointBorderColor:'#fff', pointBorderWidth:1.5,
+    tension:0.35, fill:false, yAxisID:'y1', order:1 });
+
+  const fmt = isRevenue ? v => fmtMoney(v) : v => fmtNum(v,0);
+  const tickFmt = isRevenue ? v => fmtMoney(v) : v => fmtNum(v,0);
+
+  state.charts['pdChart'] = new Chart(ctx, {
+    type:'bar',
+    data:{ labels: displayRows.map(r => r.product), datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      onHover: (e, els) => { canvas.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const row = displayRows[els[0].index];
+        if (!row) return;
+        const productMo = moRows.filter(r => r.product === row.product);
+        drillNav.metric = 'missedRev';
+        drillNav.moRows = productMo;
+        drillNav.apRows = getAssetRows();
+        drillNav.stack = [
+          { title: row.product.length > 40 ? row.product.slice(0,38)+'…' : row.product,
+            fn: () => drillLevel1('missedRev', productMo, getAssetRows()) }
+        ];
+        renderDrillModal();
+        document.getElementById('modal').classList.add('show');
+      },
+      plugins:{
+        legend:{ display:true, position:'bottom', labels:{ boxWidth:14, boxHeight:14, padding:14, font:{size:11.5}, usePointStyle:false } },
+        tooltip:{ callbacks:{ label: item => item.dataset.label==='Distribution %'
+          ? `${item.dataset.label}: ${item.parsed.y.toFixed(1)}%`
+          : `${item.dataset.label}: ${fmt(item.parsed.y)}` } }
+      },
+      scales:{
+        x:{ stacked:true, ticks:{ font:{size:10.5}, autoSkip:false, maxRotation:55, minRotation:35 }, grid:{display:false} },
+        y:{ stacked:true, position:'left', beginAtZero:true,
+            ticks:{ callback: tickFmt }, grid:{ color:'rgba(4,19,40,0.06)' },
+            title:{ display:true, text: isRevenue?'Revenue ($)':'Units', font:{size:11.5,weight:'600'}, color:'#041328' } },
+        y1:{ position:'right', beginAtZero:true, max:100,
+             ticks:{ callback: v => v+'%' }, grid:{ drawOnChartArea:false },
+             title:{ display:true, text:'Distribution %', font:{size:11.5,weight:'600'}, color:'#041328' } }
+      }
+    }
+  });
+}
+
+function pdExportCSV(moRows, aggregates) {
+  const sorted = aggregates.slice().sort((a,b) => (b.currentRev+b.missedOOSRev+b.missedDistRev)-(a.currentRev+a.missedOOSRev+a.missedDistRev));
+  const rows = [['Product','Outlets Carrying','Total Outlets','Distribution %','Current Revenue','Missed OOS Revenue','Missed Distribution Revenue (sim)','Current Units','Missed OOS Units','Missed Distribution Units (sim)']];
+  sorted.forEach(r => rows.push([
+    `"${r.product.replace(/"/g,'""')}"`,
+    r.outletsCarrying, r.totalOutlets, (r.distPct*100).toFixed(2),
+    r.currentRev.toFixed(2), r.missedOOSRev.toFixed(2), r.missedDistRev.toFixed(2),
+    r.currentUnits.toFixed(0), r.missedOOSUnits.toFixed(0), r.missedDistUnits.toFixed(0)
+  ]));
+  downloadCSV(rows.map(r=>r.join(',')).join('\r\n'), 'product_distribution.csv');
+}
+
+// Legacy OOS placeholder (kept for any callers) — replaced by renderTPC above
+function _legacyOosNoop() {}
 
 /* ---------- 18. Root Cause Relationship Panel ---------- */
 function renderRootCausePanel(rows, assets) {
@@ -2452,6 +2642,21 @@ function openAssetDetail(a) {
 /* ---------- 23b. Multi-level KPI drill-down navigator ---------- */
 
 const drillNav = { stack: [], metric: null, moRows: [], apRows: [] };
+
+// Open drill pre-navigated to a specific distributor (from chart bar clicks)
+function openMetricDrillAt(metric, distributorName, allMoRows, allApRows) {
+  drillNav.metric  = metric;
+  drillNav.moRows  = allMoRows;
+  drillNav.apRows  = allApRows;
+  drillNav.stack   = [
+    { title: 'All Distributors', fn: () => drillLevel1(metric, allMoRows, allApRows) },
+    { title: distributorName,    fn: () => drillLevel2(metric, distributorName,
+        allMoRows.filter(r=>r.distributor===distributorName),
+        allApRows.filter(a=>a.distributor===distributorName)) }
+  ];
+  renderDrillModal();
+  document.getElementById('modal').classList.add('show');
+}
 
 const DRILL_LEVELS = {
   actualRev:   ['National', 'Distributor', 'Outlet', 'SKU Detail'],
