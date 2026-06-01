@@ -311,7 +311,10 @@
   <div class="modal">
     <div class="modal-head">
       <h3 id="modalTitle">Drill-down</h3>
-      <div class="close" id="modalClose">✕</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="modalExportBtn" class="modal-export-btn" style="display:none">⬇ Export CSV</button>
+        <div class="close" id="modalClose">✕</div>
+      </div>
     </div>
     <div class="modal-body" id="modalBody"></div>
   </div>

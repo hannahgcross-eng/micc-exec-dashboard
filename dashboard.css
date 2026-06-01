@@ -439,6 +439,87 @@ input,select{font-family:inherit;font-size:13px}
 .oos-val{font-size:11.5px;font-weight:700;text-align:right;white-space:nowrap}
 .oos-miss{font-size:10.5px;text-align:right;white-space:nowrap}
 
+/* ============== DRILL-DOWN NAVIGATION ============== */
+.drill-nav-bar{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 0 12px;border-bottom:1px solid var(--border);margin-bottom:14px;
+  flex-wrap:wrap;
+}
+.drill-back-btn{
+  background:var(--surface-2);border:1px solid var(--border-2);
+  border-radius:6px;padding:5px 11px;font-size:11.5px;font-weight:600;
+  color:var(--text-2);cursor:pointer;white-space:nowrap;
+  transition:background .12s;
+}
+.drill-back-btn:hover{background:var(--border);color:var(--text)}
+.drill-crumbs{display:flex;align-items:center;flex-wrap:wrap;gap:2px;font-size:12px}
+.drill-crumb-link{
+  color:var(--primary);font-weight:600;cursor:pointer;
+  background:none;border:none;padding:2px 4px;border-radius:4px;
+  transition:background .12s;
+}
+.drill-crumb-link:hover{background:rgba(26,41,182,0.08)}
+.drill-crumb-current{color:var(--text);font-weight:700;padding:2px 4px}
+.drill-sep{color:var(--text-mute);font-size:13px;margin:0 1px}
+
+/* Drill path progress bar */
+.drill-path-bar{
+  display:flex;align-items:center;gap:0;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+  padding:10px 14px;margin-bottom:14px;overflow-x:auto;
+}
+.dpi-step{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  min-width:80px;flex-shrink:0;
+}
+.dpi-dot{
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--border-2);background:var(--surface);
+  transition:all .2s;
+}
+.dpi-step.done .dpi-dot{background:var(--green);border-color:var(--green)}
+.dpi-step.current .dpi-dot{
+  background:var(--primary);border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(26,41,182,0.18);
+}
+.dpi-label{
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  color:var(--text-mute);white-space:nowrap;
+}
+.dpi-step.done .dpi-label{color:var(--green)}
+.dpi-step.current .dpi-label{color:var(--primary)}
+.dpi-connector{
+  height:2px;flex:1;min-width:20px;
+  background:var(--border-2);margin-bottom:14px;
+}
+.dpi-connector.done{background:var(--green)}
+
+/* Drill-down table rows */
+.drill-tbl-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:480px}
+.drill-count{font-size:11.5px;color:var(--text-mute);margin-bottom:8px}
+.drill-row-hint{font-size:10.5px;color:var(--primary);opacity:0;transition:opacity .15s}
+tr.drill-row:hover .drill-row-hint{opacity:1}
+tr.drill-row{cursor:pointer}
+tr.drill-row td.drill-arrow{color:var(--primary-light);font-size:16px;text-align:center;width:28px}
+tr.drill-row:hover td.drill-arrow{color:var(--primary)}
+
+/* ============== EXPORT BUTTONS ============== */
+.modal-export-btn{
+  background:rgba(255,255,255,0.12);color:#fff;
+  border:1px solid rgba(255,255,255,0.22);border-radius:6px;
+  padding:5px 11px;font-size:11.5px;font-weight:600;cursor:pointer;
+  transition:background .15s;display:inline-flex;align-items:center;gap:5px;
+}
+.modal-export-btn:hover{background:rgba(255,255,255,0.22)}
+.tbl-export-btn{
+  background:var(--surface-2);border:1px solid var(--border-2);
+  border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;
+  color:var(--primary);cursor:pointer;white-space:nowrap;
+  transition:background .15s, border-color .15s;
+  display:inline-flex;align-items:center;gap:4px;
+}
+.tbl-export-btn:hover{background:rgba(26,41,182,0.07);border-color:var(--primary-light)}
+
 /* ============== GEOCODING PROGRESS ============== */
 .geocode-progress{
   display:flex;flex-direction:column;align-items:center;justify-content:center;

@@ -165,6 +165,47 @@ const stripPrefix = s => {
   return String(s).replace(/^MICC USA\s+/i,'').trim();
 };
 
+/* ---------- 3b. CSV export utilities ---------- */
+function tableToCSV(tableEl) {
+  const escape = s => `"${String(s ?? '').replace(/"/g, '""').trim()}"`;
+  const rows = [];
+  const headers = [...tableEl.querySelectorAll('thead th')].map(th => escape(th.textContent));
+  if (headers.length) rows.push(headers.join(','));
+  tableEl.querySelectorAll('tbody tr').forEach(tr => {
+    if (tr.classList.contains('expanded-row')) return; // skip expand panels
+    const cells = [...tr.querySelectorAll('td')].map(td => escape(td.textContent));
+    if (cells.length) rows.push(cells.join(','));
+  });
+  return rows.join('\r\n');
+}
+
+function downloadCSV(csv, filename) {
+  const bom = '﻿'; // UTF-8 BOM so Excel opens it correctly
+  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.style.display = 'none';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function safeFilename(s) {
+  return String(s || 'export').replace(/[^a-z0-9\-_ ]/gi, '').trim().replace(/\s+/g, '_').toLowerCase() || 'export';
+}
+
+function exportBtn(label, getTableFn, filename) {
+  const btn = document.createElement('button');
+  btn.className = 'tbl-export-btn';
+  btn.innerHTML = `⬇ ${label}`;
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const tbl = typeof getTableFn === 'function' ? getTableFn() : getTableFn;
+    if (!tbl) return;
+    downloadCSV(tableToCSV(tbl), safeFilename(filename) + '.csv');
+  });
+  return btn;
+}
+
 /* ---------- 4. Global state ---------- */
 const state = {
   missedOpp: [],
@@ -1069,25 +1110,27 @@ function renderExecKPIs(k, kp) {
   };
 
   grid.innerHTML = '';
+  const _mo = () => getRowsForMonths(state.primaryMonths);
+  const _ap = () => getAssetRows();
   grid.appendChild(kpiTile('Actual Revenue', fmtMoney(k.totalActualRev), kp ? delta(k.totalActualRev, kp.totalActualRev, fmtMoney, 'up') : '',
-    `${getPeriodLabel(state.primaryMonths)} · ${k.uniqueProducts} SKUs across ${k.uniqueOutlets} outlets`, 'green', () => openDrill('Actual Revenue drill', () => drillRevenue(getRowsForMonths(state.primaryMonths), 'actualRev'))));
+    `${getPeriodLabel(state.primaryMonths)} · ${k.uniqueProducts} SKUs across ${k.uniqueOutlets} outlets`,
+    'green', () => openMetricDrill('actualRev', _mo(), _ap())));
   grid.appendChild(kpiTile('Missed Revenue', fmtMoney(k.totalMissedRev), kp ? delta(k.totalMissedRev, kp.totalMissedRev, fmtMoney, 'down') : '',
-    `${fmtNum(k.totalMissedUnits)} missed units · avg ${fmtMoney(k.totalMissedRev / Math.max(1,k.uniqueAssets))} per asset`, 'red', () => openDrill('Missed Revenue drill', () => drillRevenue(getRowsForMonths(state.primaryMonths), 'missedRev'))));
+    `${fmtNum(k.totalMissedUnits)} missed units · avg ${fmtMoney(k.totalMissedRev / Math.max(1,k.uniqueAssets))} per asset`,
+    'red', () => openMetricDrill('missedRev', _mo(), _ap())));
   grid.appendChild(kpiTile('Empty Share of Shelf',
-    k.emptySoS != null ? fmtPct(k.emptySoS) : '—',
-    '',
+    k.emptySoS != null ? fmtPct(k.emptySoS) : '—', '',
     k.emptySoS != null ? 'Empty Facings / Total Facings × 100 (Playbook)' : 'No Asset Performance data uploaded',
-    'orange', () => openDrill('Empty Share of Shelf', () => drillSoS(getAssetRows(), 'emptySoS', 'Empty SoS'))));
+    'orange', () => openMetricDrill('emptySoS', _mo(), _ap())));
   grid.appendChild(kpiTile('Foreign Share of Shelf',
-    k.foreignSoS != null ? fmtPct(k.foreignSoS) : '—',
-    '',
+    k.foreignSoS != null ? fmtPct(k.foreignSoS) : '—', '',
     k.foreignSoS != null ? 'Foreign Facings / Total Facings × 100' : 'No Asset Performance data uploaded',
-    'purple', () => openDrill('Foreign Share of Shelf', () => drillSoS(getAssetRows(), 'foreignSoS', 'Foreign SoS'))));
+    'purple', () => openMetricDrill('foreignSoS', _mo(), _ap())));
   grid.appendChild(kpiTile('Avg Days SKU OOS / Product',
     fmtNum(k.avgOOSDaysPerProduct, 1) + ' d',
     kp ? deltaNum(k.avgOOSDaysPerProduct, kp.avgOOSDaysPerProduct, 'down') : '',
     `Average over ${k.moRowCount.toLocaleString()} SKU-asset rows · ${getPeriodLabel(state.primaryMonths)}`,
-    'pink', () => openDrill('Avg Days SKU OOS', () => drillOOS(getRowsForMonths(state.primaryMonths)))));
+    'pink', () => openMetricDrill('oosDays', _mo(), _ap())));
   const activeAssets = k.totalAssets - k.noCommAssets - k.noImageAssets - k.noDoorAssets;
   const activePct = k.totalAssets > 0 ? (activeAssets / k.totalAssets) * 100 : null;
   const assetColorClass = activePct == null ? '' : activePct >= 90 ? 'green' : activePct >= 75 ? 'orange' : 'red';
@@ -1099,7 +1142,7 @@ function renderExecKPIs(k, kp) {
       return deltaNum(activePct, priorPct, 'up');
     })() : '',
     `${activeAssets.toLocaleString()} of ${k.totalAssets.toLocaleString()} active · ${k.noCommAssets} No Comm · ${k.noImageAssets} No Image · ${k.noDoorAssets} No Door`,
-    assetColorClass, () => openDrill('Asset Health', () => drillAssets(getAssetRows()))));
+    assetColorClass, () => openMetricDrill('assetHealth', _mo(), _ap())));
 }
 
 function kpiTile(label, value, deltaHTML, sub, colorClass, onClick) {
@@ -1448,10 +1491,16 @@ function buildAssetDetailTable(assets, title) {
     const rank = r => r.noCommunication ? 0 : r.noImage ? 1 : r.noDoor ? 2 : 3;
     return rank(a) - rank(b);
   });
+  const hdrRow = document.createElement('div');
+  hdrRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
   const hdr = document.createElement('div');
-  hdr.className = 'muted small'; hdr.style.marginBottom = '8px';
+  hdr.className = 'muted small';
   hdr.textContent = `${sorted.length.toLocaleString()} asset${sorted.length !== 1 ? 's' : ''} — click any row for full detail`;
-  wrap.appendChild(hdr);
+  hdrRow.appendChild(hdr);
+  // Export button added here — modal's auto-wiring also catches it, but this ensures correct filename
+  const expBtn = exportBtn('Export CSV', () => tbl, safeFilename(title || 'assets'));
+  hdrRow.appendChild(expBtn);
+  wrap.appendChild(hdrRow);
   const tblWrap = document.createElement('div'); tblWrap.className = 'tbl-wrap';
   const tbl = document.createElement('table'); tbl.className = 'tbl';
   tbl.innerHTML = `<thead><tr>
@@ -1600,7 +1649,15 @@ function renderMissedRevDrill(rows) {
     {h:'Planogram', k:'planogram'},
   ];
   wrap.innerHTML = '';
-  wrap.appendChild(buildTable('missedRevTbl', sorted, cols, true));
+  const tblWrap = buildTable('missedRevTbl', sorted, cols, true);
+  wrap.appendChild(tblWrap);
+
+  // Export button in card-head
+  const cardHead = wrap.closest('.card')?.querySelector('.card-head');
+  if (cardHead) {
+    cardHead.querySelectorAll('.tbl-export-btn').forEach(b => b.remove());
+    cardHead.appendChild(exportBtn('Export CSV', () => document.getElementById('missedRevTbl'), 'missed_revenue_detail'));
+  }
 }
 
 function buildTable(tblId, rows, cols, expandable=false) {
@@ -1919,6 +1976,13 @@ function renderOutletPriority(rows, assets) {
 
   wrap.innerHTML = '';
   wrap.appendChild(buildTableWithExpand('outletPriorityTbl', list, cols, (o) => buildOutletExpand(o, rows, assets)));
+
+  // Export button
+  const cardHead = wrap.closest('.card')?.querySelector('.card-head');
+  if (cardHead) {
+    cardHead.querySelectorAll('.tbl-export-btn').forEach(b => b.remove());
+    cardHead.appendChild(exportBtn('Export CSV', () => document.getElementById('outletPriorityTbl'), 'outlet_priority'));
+  }
 }
 
 function statusPill(v) {
@@ -2156,6 +2220,12 @@ function renderRouteView(rows, assets) {
   ];
   wrap.innerHTML = '';
   wrap.appendChild(buildTable('routeTbl', list, cols, false));
+
+  const cardHead = wrap.closest('.card')?.querySelector('.card-head');
+  if (cardHead) {
+    cardHead.querySelectorAll('.tbl-export-btn').forEach(b => b.remove());
+    cardHead.appendChild(exportBtn('Export CSV', () => document.getElementById('routeTbl'), 'route_view'));
+  }
 }
 
 /* ---------- 22. MOQ / MOV panel ---------- */
@@ -2181,16 +2251,19 @@ function renderMOQPanel(rows) {
   const belowMov = outlets.filter(o => o.missedRev > 0 && o.missedRev < movThreshold).sort((a,b)=>b.missedRev-a.missedRev);
   const aboveMov = outlets.filter(o => o.missedRev >= movThreshold).sort((a,b)=>b.missedRev-a.missedRev);
 
-  moqEl.innerHTML = `
-    <div class="muted small" style="margin-bottom:6px">${belowMov.length} outlet(s) below \$${movThreshold} missed-revenue threshold (cannot justify individual service)</div>
-    ${belowMov.length ? buildTable('movTbl', belowMov.slice(0,30), [
-      {h:'Outlet', k:'outlet'},
-      {h:'Route', k:'route', cls:'tight'},
-      {h:'Distributor', k:'distributor'},
-      {h:'Missed Rev', k:'missedRev', cls:'num bad', fmt:fmtMoneyFull},
+  moqEl.innerHTML = `<div class="muted small" style="margin-bottom:6px">${belowMov.length} outlet(s) below $${movThreshold} missed-revenue threshold (cannot justify individual service)</div>`;
+  if (belowMov.length) {
+    const tblWrap = buildTable('movTbl', belowMov.slice(0,30), [
+      {h:'Outlet', k:'outlet'},{h:'Route', k:'route', cls:'tight'},
+      {h:'Distributor', k:'distributor'},{h:'Missed Rev', k:'missedRev', cls:'num bad', fmt:fmtMoneyFull},
       {h:'SKUs', k:'productCount', cls:'num', fmt:v=>fmtNum(v,0)},
-    ]).outerHTML : '<div class="empty-state small">None below threshold.</div>'}
-  `;
+    ]);
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:4px';
+    row.appendChild(exportBtn('Export CSV', () => document.getElementById('movTbl'), 'outlets_below_mov'));
+    moqEl.appendChild(row); moqEl.appendChild(tblWrap);
+  } else {
+    moqEl.innerHTML += '<div class="empty-state small">None below threshold.</div>';
+  }
 
   // routes above threshold (potential bundled service)
   const byRoute = {};
@@ -2202,27 +2275,49 @@ function renderMOQPanel(rows) {
   });
   const routesAbove = Object.values(byRoute).filter(r => r.missedRev >= routeMov).sort((a,b)=>b.missedRev-a.missedRev);
 
-  movEl.innerHTML = `
-    <div class="muted small" style="margin-bottom:6px">${routesAbove.length} route(s) above \$${routeMov} bundled missed-revenue threshold (may justify route-level service)</div>
-    ${routesAbove.length ? buildTable('routeMovTbl', routesAbove.slice(0,30), [
-      {h:'Route', k:'route', cls:'tight'},
-      {h:'Distributor', k:'distributor'},
+  movEl.innerHTML = `<div class="muted small" style="margin-bottom:6px">${routesAbove.length} route(s) above $${routeMov} bundled missed-revenue threshold (may justify route-level service)</div>`;
+  if (routesAbove.length) {
+    const tblWrap = buildTable('routeMovTbl', routesAbove.slice(0,30), [
+      {h:'Route', k:'route', cls:'tight'},{h:'Distributor', k:'distributor'},
       {h:'Outlets', k:'outletCount', cls:'num', fmt:v=>fmtNum(v,0)},
       {h:'Bundled Missed Rev', k:'missedRev', cls:'num bad', fmt:fmtMoneyFull},
-    ]).outerHTML : '<div class="empty-state small">No routes above threshold.</div>'}
-  `;
+    ]);
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:4px';
+    row.appendChild(exportBtn('Export CSV', () => document.getElementById('routeMovTbl'), 'routes_above_mov'));
+    movEl.appendChild(row); movEl.appendChild(tblWrap);
+  } else {
+    movEl.innerHTML += '<div class="empty-state small">No routes above threshold.</div>';
+  }
 }
 
 /* ---------- 23. Modal drill-downs ---------- */
 function openDrill(title, contentBuilder) {
   document.getElementById('modalTitle').textContent = title;
-  document.getElementById('modalBody').innerHTML = '';
+  const body = document.getElementById('modalBody');
+  body.innerHTML = '';
   const content = contentBuilder();
-  if (typeof content === 'string') document.getElementById('modalBody').innerHTML = content;
-  else if (content) document.getElementById('modalBody').appendChild(content);
+  if (typeof content === 'string') body.innerHTML = content;
+  else if (content) body.appendChild(content);
+
+  // Wire modal export button — finds the first table in the modal body
+  const exportBtn = document.getElementById('modalExportBtn');
+  if (exportBtn) {
+    const tbl = body.querySelector('table.tbl');
+    if (tbl) {
+      exportBtn.style.display = 'inline-flex';
+      exportBtn.onclick = () => downloadCSV(tableToCSV(tbl), safeFilename(title) + '.csv');
+    } else {
+      exportBtn.style.display = 'none';
+    }
+  }
+
   document.getElementById('modal').classList.add('show');
 }
-function closeDrill() { document.getElementById('modal').classList.remove('show'); }
+function closeDrill() {
+  document.getElementById('modal').classList.remove('show');
+  const exportBtn = document.getElementById('modalExportBtn');
+  if (exportBtn) exportBtn.style.display = 'none';
+}
 
 function drillRevenue(rows, key) {
   const wrap = document.createElement('div');
@@ -2334,6 +2429,346 @@ function openAssetDetail(a) {
     ${dailyHtml}
   `;
   document.getElementById('modal').classList.add('show');
+}
+
+/* ---------- 23b. Multi-level KPI drill-down navigator ---------- */
+
+const drillNav = { stack: [], metric: null, moRows: [], apRows: [] };
+
+const DRILL_LEVELS = {
+  actualRev:   ['National', 'Distributor', 'Outlet', 'SKU Detail'],
+  missedRev:   ['National', 'Distributor', 'Outlet', 'SKU Detail'],
+  oosDays:     ['National', 'Distributor', 'Outlet', 'SKU Detail'],
+  emptySoS:    ['National', 'Distributor', 'Outlet', 'Asset Detail'],
+  foreignSoS:  ['National', 'Distributor', 'Outlet', 'Asset Detail'],
+  assetHealth: ['National', 'Distributor', 'Outlet', 'Asset Detail'],
+};
+const DRILL_LABELS = {
+  actualRev:'Actual Revenue', missedRev:'Missed Revenue', oosDays:'Avg OOS Days',
+  emptySoS:'Empty Share of Shelf', foreignSoS:'Foreign Share of Shelf', assetHealth:'Asset Health',
+};
+
+function openMetricDrill(metric, moRows, apRows) {
+  drillNav.stack = [];
+  drillNav.metric = metric;
+  drillNav.moRows = moRows;
+  drillNav.apRows = apRows;
+  drillNav.stack.push({ title: 'All Distributors', fn: () => drillLevel1(metric, moRows, apRows) });
+  renderDrillModal();
+  document.getElementById('modal').classList.add('show');
+}
+
+function drillPush(title, fn) {
+  drillNav.stack.push({ title, fn });
+  renderDrillModal();
+}
+
+function renderDrillModal() {
+  const cur = drillNav.stack[drillNav.stack.length - 1];
+  const metric = drillNav.metric;
+  const body = document.getElementById('modalBody');
+  body.innerHTML = '';
+  document.getElementById('modalTitle').textContent = DRILL_LABELS[metric] || metric;
+
+  // ── Path progress bar ────────────────────────────────────────────────────
+  const levels = DRILL_LEVELS[metric] || [];
+  const pathBar = document.createElement('div');
+  pathBar.className = 'drill-path-bar';
+  levels.forEach((lbl, i) => {
+    const step = document.createElement('div');
+    step.className = 'dpi-step' + (i < drillNav.stack.length - 1 ? ' done' : i === drillNav.stack.length - 1 ? ' current' : '');
+    step.innerHTML = `<div class="dpi-dot"></div><div class="dpi-label">${lbl}</div>`;
+    // Click done steps to go back to that level
+    if (i < drillNav.stack.length - 1) {
+      step.style.cursor = 'pointer';
+      step.title = `Back to ${lbl}`;
+      step.addEventListener('click', () => { drillNav.stack.splice(i + 1); renderDrillModal(); });
+    }
+    pathBar.appendChild(step);
+    if (i < levels.length - 1) {
+      const conn = document.createElement('div');
+      conn.className = 'dpi-connector' + (i < drillNav.stack.length - 1 ? ' done' : '');
+      pathBar.appendChild(conn);
+    }
+  });
+  body.appendChild(pathBar);
+
+  // ── Breadcrumb back nav ──────────────────────────────────────────────────
+  if (drillNav.stack.length > 1) {
+    const nav = document.createElement('div');
+    nav.className = 'drill-nav-bar';
+    const back = document.createElement('button');
+    back.className = 'drill-back-btn';
+    back.textContent = '← Back';
+    back.onclick = () => { drillNav.stack.pop(); renderDrillModal(); };
+    nav.appendChild(back);
+    const crumbs = document.createElement('div');
+    crumbs.className = 'drill-crumbs';
+    drillNav.stack.forEach((item, i) => {
+      if (i > 0) crumbs.insertAdjacentHTML('beforeend', '<span class="drill-sep">›</span>');
+      if (i < drillNav.stack.length - 1) {
+        const btn = document.createElement('button');
+        btn.className = 'drill-crumb-link'; btn.textContent = item.title;
+        btn.onclick = () => { drillNav.stack.splice(i + 1); renderDrillModal(); };
+        crumbs.appendChild(btn);
+      } else {
+        crumbs.insertAdjacentHTML('beforeend', `<span class="drill-crumb-current">${item.title}</span>`);
+      }
+    });
+    nav.appendChild(crumbs);
+    body.appendChild(nav);
+  }
+
+  // ── Content ───────────────────────────────────────────────────────────────
+  const content = cur.fn();
+  if (content) body.appendChild(content);
+
+  // ── Export wiring ─────────────────────────────────────────────────────────
+  const expBtn = document.getElementById('modalExportBtn');
+  if (expBtn) {
+    const tbl = body.querySelector('table.tbl');
+    expBtn.style.display = tbl ? 'inline-flex' : 'none';
+    if (tbl) expBtn.onclick = () => downloadCSV(tableToCSV(tbl), safeFilename(cur.title) + '.csv');
+  }
+}
+
+// ── Drill table builder (clickable rows navigate deeper) ─────────────────────
+function buildDrillTable(id, rows, cols, onRowClick) {
+  const wrap = document.createElement('div'); wrap.className = 'drill-tbl-wrap';
+  const tbl = document.createElement('table'); tbl.className = 'tbl'; tbl.id = id;
+  const thead = document.createElement('thead'); const trH = document.createElement('tr');
+  cols.forEach(c => {
+    const th = document.createElement('th'); th.textContent = c.h;
+    if (c.cls && c.cls.includes('num')) th.classList.add('num');
+    trH.appendChild(th);
+  });
+  if (onRowClick) trH.insertAdjacentHTML('beforeend', '<th style="width:28px"></th>');
+  thead.appendChild(trH); tbl.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    if (onRowClick) tr.className = 'drill-row';
+    cols.forEach(c => {
+      const td = document.createElement('td'); if (c.cls) td.className = c.cls;
+      const v = r[c.k]; const html = c.fmt ? c.fmt(v) : (v == null ? '' : String(v));
+      if (html && /<[a-z]/i.test(html)) td.innerHTML = html; else td.textContent = html;
+      tr.appendChild(td);
+    });
+    if (onRowClick) {
+      const arrowTd = document.createElement('td'); arrowTd.className = 'drill-arrow'; arrowTd.textContent = '›';
+      tr.appendChild(arrowTd);
+      tr.addEventListener('click', () => onRowClick(r));
+    }
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody); wrap.appendChild(tbl);
+  return wrap;
+}
+
+// ── LEVEL 1: National → by Distributor ───────────────────────────────────────
+function drillLevel1(metric, moRows, apRows) {
+  const wrap = document.createElement('div');
+
+  if (['actualRev','missedRev','oosDays'].includes(metric)) {
+    const byDist = {};
+    moRows.forEach(r => {
+      if (!byDist[r.distributor]) byDist[r.distributor] = { distributor:r.distributor, actual:0, missed:0, potential:0, oosSum:0, n:0, outlets:new Set(), skus:new Set() };
+      byDist[r.distributor].actual   += r.actualRev;
+      byDist[r.distributor].missed   += r.missedRev;
+      byDist[r.distributor].potential+= r.potentialRev;
+      byDist[r.distributor].oosSum   += r.oosDays;
+      byDist[r.distributor].n++;
+      byDist[r.distributor].outlets.add(r.outletCode || r.outlet);
+      byDist[r.distributor].skus.add(r.product);
+    });
+    const list = Object.values(byDist).map(d => ({
+      ...d, avgOos: d.oosSum/Math.max(1,d.n), outletCount:d.outlets.size, skuCount:d.skus.size
+    })).sort((a,b) => metric==='oosDays' ? b.avgOos-a.avgOos : b[metric==='actualRev'?'actual':'missed']-a[metric==='actualRev'?'actual':'missed']);
+
+    const cols = [
+      {h:'Distributor', k:'distributor'},
+      {h:'Outlets', k:'outletCount', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'SKUs', k:'skuCount', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'Actual Rev', k:'actual', cls:'num', fmt:fmtMoneyFull},
+      {h:'Missed Rev', k:'missed', cls:'num bad', fmt:fmtMoneyFull},
+      {h:'Potential Rev', k:'potential', cls:'num', fmt:fmtMoneyFull},
+      {h:'Avg OOS Days', k:'avgOos', cls:'num', fmt:v=>fmtNum(v,1)},
+    ];
+    wrap.insertAdjacentHTML('beforeend', `<div class="drill-count">${list.length} distributors — click any row to drill into outlet level</div>`);
+    wrap.appendChild(buildDrillTable('dL1', list, cols, row => {
+      const distMo = moRows.filter(r=>r.distributor===row.distributor);
+      const distAp = apRows.filter(a=>a.distributor===row.distributor);
+      drillPush(row.distributor, () => drillLevel2(metric, row.distributor, distMo, distAp));
+    }));
+
+  } else {
+    // SoS / Asset Health
+    const byDist = {};
+    apRows.forEach(a => {
+      if (!byDist[a.distributor]) byDist[a.distributor] = { distributor:a.distributor, eSoSSum:0, fSoSSum:0, n:0, noComm:0, noImage:0, noDoor:0 };
+      byDist[a.distributor].eSoSSum += a.emptySoS; byDist[a.distributor].fSoSSum += a.foreignSoS;
+      byDist[a.distributor].n++;
+      if (a.noCommunication) byDist[a.distributor].noComm++;
+      if (a.noImage) byDist[a.distributor].noImage++;
+      if (a.noDoor) byDist[a.distributor].noDoor++;
+    });
+    const revByDist = {}; moRows.forEach(r => { revByDist[r.distributor]=(revByDist[r.distributor]||0)+r.actualRev; });
+    const list = Object.values(byDist).map(d => ({
+      ...d, avgESoS:d.eSoSSum/Math.max(1,d.n), avgFSoS:d.fSoSSum/Math.max(1,d.n),
+      activePct:((d.n-d.noComm-d.noImage-d.noDoor)/Math.max(1,d.n))*100,
+      actual:revByDist[d.distributor]||0,
+    })).sort((a,b) => metric==='emptySoS' ? b.avgESoS-a.avgESoS : metric==='foreignSoS' ? b.avgFSoS-a.avgFSoS : a.activePct-b.activePct);
+
+    const cols = [
+      {h:'Distributor', k:'distributor'},
+      {h:'Total Assets', k:'n', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'Active %', k:'activePct', cls:'num', fmt:v=>fmtPct(v)},
+      {h:'No Comm', k:'noComm', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'No Image', k:'noImage', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'No Door', k:'noDoor', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'Avg Empty SoS', k:'avgESoS', cls:'num', fmt:v=>fmtPct(v)},
+      {h:'Avg Foreign SoS', k:'avgFSoS', cls:'num', fmt:v=>fmtPct(v)},
+      {h:'Actual Rev', k:'actual', cls:'num', fmt:fmtMoneyFull},
+    ];
+    wrap.insertAdjacentHTML('beforeend', `<div class="drill-count">${list.length} distributors — click any row to drill into outlet level</div>`);
+    wrap.appendChild(buildDrillTable('dL1', list, cols, row => {
+      const distMo = moRows.filter(r=>r.distributor===row.distributor);
+      const distAp = apRows.filter(a=>a.distributor===row.distributor);
+      drillPush(row.distributor, () => drillLevel2(metric, row.distributor, distMo, distAp));
+    }));
+  }
+  return wrap;
+}
+
+// ── LEVEL 2: Distributor → by Outlet ─────────────────────────────────────────
+function drillLevel2(metric, distributor, moRows, apRows) {
+  const wrap = document.createElement('div');
+
+  if (['actualRev','missedRev','oosDays'].includes(metric)) {
+    const byOutlet = {};
+    moRows.forEach(r => {
+      const k = r.outletCode||r.outlet;
+      if (!byOutlet[k]) byOutlet[k] = { outlet:r.outlet, outletCode:r.outletCode, route:r.route, actual:0, missed:0, potential:0, oosSum:0, n:0, skus:new Set() };
+      byOutlet[k].actual   += r.actualRev; byOutlet[k].missed  += r.missedRev;
+      byOutlet[k].potential+= r.potentialRev; byOutlet[k].oosSum += r.oosDays; byOutlet[k].n++;
+      byOutlet[k].skus.add(r.product);
+    });
+    const list = Object.values(byOutlet).map(o => ({
+      ...o, avgOos:o.oosSum/Math.max(1,o.n), skuCount:o.skus.size
+    })).sort((a,b) => metric==='oosDays' ? b.avgOos-a.avgOos : b[metric==='actualRev'?'actual':'missed']-a[metric==='actualRev'?'actual':'missed']);
+
+    const cols = [
+      {h:'Outlet', k:'outlet'}, {h:'Code', k:'outletCode', cls:'tight'}, {h:'Route', k:'route', cls:'tight'},
+      {h:'SKUs', k:'skuCount', cls:'num', fmt:v=>fmtNum(v,0)},
+      {h:'Actual Rev', k:'actual', cls:'num', fmt:fmtMoneyFull},
+      {h:'Missed Rev', k:'missed', cls:'num bad', fmt:fmtMoneyFull},
+      {h:'Avg OOS Days', k:'avgOos', cls:'num', fmt:v=>fmtNum(v,1)},
+    ];
+    wrap.insertAdjacentHTML('beforeend', `<div class="drill-count">${list.length} outlets — click any row to see SKU detail</div>`);
+    wrap.appendChild(buildDrillTable('dL2', list, cols, row => {
+      const k = row.outletCode||row.outlet;
+      const outletMo = moRows.filter(r=>(r.outletCode||r.outlet)===k);
+      const outletAp = apRows.filter(a=>(a.outletCode||a.outlet)===k);
+      drillPush(row.outlet, () => drillLevel3Revenue(metric, outletMo, outletAp));
+    }));
+
+  } else {
+    // SoS / Asset Health: outlet = asset row
+    const sorted = apRows.slice().sort((a,b) =>
+      metric==='emptySoS' ? b.emptySoS-a.emptySoS :
+      metric==='foreignSoS' ? b.foreignSoS-a.foreignSoS :
+      (a.noCommunication?0:a.noImage?1:a.noDoor?2:3)-(b.noCommunication?0:b.noImage?1:b.noDoor?2:3));
+    const revByOutlet = {}; moRows.forEach(r => { const k=r.outletCode||r.outlet; revByOutlet[k]=(revByOutlet[k]||0)+r.actualRev; });
+
+    const cols = [
+      {h:'Outlet', k:'outlet'}, {h:'Code', k:'outletCode', cls:'tight'}, {h:'Asset', k:'asset', cls:'tight'},
+      {h:'Camera', k:'cabinetType'}, {h:'Status', k:'status', fmt:v=>statusPill(v)},
+      {h:'Last Image', k:'lastImg', cls:'tight', fmt:fmtDate},
+      {h:'Empty SoS', k:'emptySoS', cls:'num', fmt:v=>fmtPct(v)},
+      {h:'Foreign SoS', k:'foreignSoS', cls:'num', fmt:v=>fmtPct(v)},
+    ];
+    wrap.insertAdjacentHTML('beforeend', `<div class="drill-count">${sorted.length} outlets — click any row for full asset detail</div>`);
+    wrap.appendChild(buildDrillTable('dL2', sorted, cols, row => {
+      drillPush(row.outlet, () => drillLevel3Asset(row, moRows));
+    }));
+  }
+  return wrap;
+}
+
+// ── LEVEL 3a: Outlet → SKU Detail (revenue / OOS) ────────────────────────────
+function drillLevel3Revenue(metric, moRows, apRows) {
+  const wrap = document.createElement('div');
+  const sorted = moRows.slice().sort((a,b) =>
+    metric==='oosDays' ? b.oosDays-a.oosDays : metric==='actualRev' ? b.actualRev-a.actualRev : b.missedRev-a.missedRev);
+
+  // Asset info if available
+  const asset = apRows[0];
+  if (asset) {
+    wrap.insertAdjacentHTML('beforeend', `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;font-size:12px">
+        <div><span class="muted">Asset</span> <b>${asset.asset}</b></div>
+        <div><span class="muted">Camera</span> <b>${asset.cabinetType||'—'}</b></div>
+        <div><span class="muted">Status</span> ${statusPill(asset.status)}</div>
+        <div><span class="muted">Last Image</span> <b>${fmtDate(asset.lastImg)}</b></div>
+        <div><span class="muted">Empty SoS</span> <b>${fmtPct(asset.emptySoS)}</b></div>
+        <div><span class="muted">Foreign SoS</span> <b>${fmtPct(asset.foreignSoS)}</b></div>
+      </div>`);
+  }
+
+  const cols = [
+    {h:'Product', k:'product'}, {h:'Brand', k:'brand', cls:'tight'},
+    {h:'Unit Price', k:'unitPrice', cls:'num', fmt:fmtMoneyFull},
+    {h:'Units Sold', k:'unitsSold', cls:'num', fmt:v=>fmtNum(v,0)},
+    {h:'Avg Daily Units', k:'avgDailyUnits', cls:'num', fmt:v=>fmtNum(v,2)},
+    {h:'OOS Days', k:'oosDays', cls:'num', fmt:v=>fmtNum(v,1)},
+    {h:'Actual Rev', k:'actualRev', cls:'num', fmt:fmtMoneyFull},
+    {h:'Missed Rev', k:'missedRev', cls:'num bad', fmt:fmtMoneyFull},
+    {h:'Potential Rev', k:'potentialRev', cls:'num', fmt:fmtMoneyFull},
+  ];
+  wrap.insertAdjacentHTML('beforeend', `<div class="drill-count">${sorted.length} SKU rows</div>`);
+  wrap.appendChild(buildDrillTable('dL3', sorted, cols, null)); // no further drill
+  return wrap;
+}
+
+// ── LEVEL 3b: Outlet → Asset Detail (SoS / health) ───────────────────────────
+function drillLevel3Asset(asset, moRows) {
+  const wrap = document.createElement('div');
+  // Full asset detail card
+  let dailyHtml = '';
+  if (asset.dailyImg && asset.dailyImg.length) {
+    dailyHtml = `<div class="muted small" style="margin:12px 0 4px">Rolling 7-day image activity:</div><div class="img-timeline">` +
+      asset.dailyImg.map(d => {
+        const cls = d.images===0?'none':d.images<2?'low':d.images<5?'ok':'high';
+        return `<div class="day ${cls}" title="${d.date}: ${d.images} images / ${d.doors} doors">${d.images}</div>`;
+      }).join('') + '</div>';
+  }
+  // Revenue from MO rows for this outlet
+  const outletMo = moRows.filter(r=>(r.outletCode||r.outlet)===(asset.outletCode||asset.outlet));
+  const totalActual = outletMo.reduce((s,r)=>s+r.actualRev,0);
+  const totalMissed = outletMo.reduce((s,r)=>s+r.missedRev,0);
+  wrap.innerHTML = `
+    <div class="grid-3" style="gap:14px;margin-bottom:14px">
+      <div><div class="muted small">Outlet</div><div><b>${asset.outlet}</b> · ${asset.outletCode||'—'}</div></div>
+      <div><div class="muted small">Status</div>${statusPill(asset.status)}</div>
+      <div><div class="muted small">Camera Type</div>${asset.cabinetType||'—'}</div>
+      <div><div class="muted small">Asset Serial</div>${asset.asset}</div>
+      <div><div class="muted small">Last Image</div>${fmtDate(asset.lastImg)}</div>
+      <div><div class="muted small">Last Ping</div>${fmtDate(asset.devicePing)}</div>
+      <div><div class="muted small">Empty SoS</div><b>${fmtPct(asset.emptySoS)}</b></div>
+      <div><div class="muted small">Foreign SoS</div><b>${fmtPct(asset.foreignSoS)}</b></div>
+      <div><div class="muted small">Diagnosis</div>${asset.diagnosis||'—'}</div>
+      ${totalActual ? `<div><div class="muted small">Actual Revenue</div><b>${fmtMoneyFull(totalActual)}</b></div>` : ''}
+      ${totalMissed ? `<div><div class="muted small">Missed Revenue</div><b style="color:var(--red)">${fmtMoneyFull(totalMissed)}</b></div>` : ''}
+    </div>${dailyHtml}`;
+  if (outletMo.length) {
+    wrap.insertAdjacentHTML('beforeend', `<div class="muted small" style="margin:12px 0 6px">SKU detail (${outletMo.length} rows):</div>`);
+    wrap.appendChild(buildDrillTable('dL3a', outletMo.sort((a,b)=>b.missedRev-a.missedRev), [
+      {h:'Product',k:'product'},{h:'OOS Days',k:'oosDays',cls:'num',fmt:v=>fmtNum(v,1)},
+      {h:'Actual Rev',k:'actualRev',cls:'num',fmt:fmtMoneyFull},
+      {h:'Missed Rev',k:'missedRev',cls:'num bad',fmt:fmtMoneyFull},
+    ], null));
+  }
+  return wrap;
 }
 
 /* ---------- 24. Wire-up ---------- */
