@@ -1137,11 +1137,7 @@ function renderExecKPIs(k, kp) {
   const assetColorClass = activePct == null ? '' : activePct >= 90 ? 'green' : activePct >= 75 ? 'orange' : 'red';
   grid.appendChild(kpiTile('Asset Health',
     activePct != null ? fmtPct(activePct) : '—',
-    kp ? (() => {
-      const priorActive = kp.totalAssets - kp.noCommAssets - kp.noImageAssets - kp.noDoorAssets;
-      const priorPct = kp.totalAssets > 0 ? (priorActive / kp.totalAssets) * 100 : null;
-      return deltaNum(activePct, priorPct, 'up');
-    })() : '',
+    '',
     `${activeAssets.toLocaleString()} of ${k.totalAssets.toLocaleString()} active · ${k.noCommAssets} No Comm · ${k.noImageAssets} No Image · ${k.noDoorAssets} No Door`,
     assetColorClass, () => openMetricDrill('assetHealth', _mo(), _ap())));
 }
