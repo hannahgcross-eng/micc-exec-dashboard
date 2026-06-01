@@ -160,6 +160,12 @@ const fmtNum = (v, dec=0) => {
   if (v == null || !isFinite(v)) return '—';
   return num(v).toLocaleString(undefined, {maximumFractionDigits:dec, minimumFractionDigits:dec});
 };
+// Calculated metric helpers (respect all active filters via calling context)
+const calcMissedRevPct = (missedRev, actualRev) => {
+  const total = (actualRev || 0) + (missedRev || 0);
+  return total > 0 ? (missedRev / total) * 100 : 0;
+};
+
 const stripPrefix = s => {
   if (!s) return s;
   return String(s).replace(/^MICC USA\s+/i,'').trim();
@@ -1168,7 +1174,7 @@ function renderTopDistributorsByMissedRev(rows) {
     byDist[r.distributor].actual += r.actualRev;
   });
   const sorted = Object.entries(byDist)
-    .sort((a, b) => (b[1].missed + b[1].actual) - (a[1].missed + a[1].actual))
+    .sort((a, b) => b[1].missed - a[1].missed)   // sort by Missed Revenue descending
     .slice(0, 10);
   destroyChart('chTopDist');
   const ctx = document.getElementById('chTopDist').getContext('2d');
@@ -1222,18 +1228,35 @@ function renderTopDistributorsByMissedRev(rows) {
 }
 
 function renderEmptyShelfChart(primary, comparison, assets) {
+  // Build per-distributor Empty SoS from asset performance data
   const distMap = {};
   assets.forEach(a => {
-    if (!distMap[a.distributor]) distMap[a.distributor] = { sum: 0, n: 0 };
-    distMap[a.distributor].sum += a.emptySoS;
+    if (!distMap[a.distributor]) distMap[a.distributor] = { sosSum: 0, n: 0 };
+    distMap[a.distributor].sosSum += a.emptySoS;
     distMap[a.distributor].n += 1;
   });
-  const actualByDist = {};
-  primary.forEach(r => { actualByDist[r.distributor] = (actualByDist[r.distributor] || 0) + r.actualRev; });
+
+  // Build per-distributor Avg OOS Days and Missed Revenue from MO data
+  const oosByDist    = {};
+  const missedByDist = {};
+  primary.forEach(r => {
+    if (!oosByDist[r.distributor])    oosByDist[r.distributor]    = { sum: 0, n: 0 };
+    if (!missedByDist[r.distributor]) missedByDist[r.distributor] = 0;
+    oosByDist[r.distributor].sum += r.oosDays;
+    oosByDist[r.distributor].n++;
+    missedByDist[r.distributor] += r.missedRev;
+  });
 
   const arr = Object.entries(distMap)
-    .map(([k, v]) => ({ dist: k, sos: v.sum / v.n, actual: actualByDist[k] || 0 }))
-    .sort((a, b) => b.sos - a.sos).slice(0, 12);
+    .map(([k, v]) => ({
+      dist:      k,
+      sos:       v.sosSum / v.n,
+      avgOos:    oosByDist[k]    ? oosByDist[k].sum / oosByDist[k].n : 0,
+      missedRev: missedByDist[k] || 0,
+      assetCount: v.n,
+    }))
+    .sort((a, b) => b.sos - a.sos)
+    .slice(0, 12);
 
   destroyChart('chEmpty');
   const el = document.getElementById('chEmpty'); if (!el) return;
@@ -1248,23 +1271,18 @@ function renderEmptyShelfChart(primary, comparison, assets) {
           label: 'Empty SoS %',
           data: arr.map(s => +s.sos.toFixed(2)),
           backgroundColor: '#FF8500',
-          borderRadius: 3,
-          yAxisID: 'y',
-          order: 2,
+          borderRadius: 3, yAxisID: 'y', order: 2,
         },
         {
-          label: 'Actual Revenue',
-          data: arr.map(s => s.actual),
+          label: 'Avg OOS Days',
+          data: arr.map(s => +s.avgOos.toFixed(1)),
           type: 'line',
           borderColor: '#1A29B6',
           backgroundColor: 'rgba(26,41,182,0.08)',
           pointBackgroundColor: '#1A29B6',
-          pointRadius: 4,
-          borderWidth: 2,
-          fill: false,
-          tension: 0.3,
-          yAxisID: 'y2',
-          order: 1,
+          pointRadius: 4, borderWidth: 2,
+          fill: false, tension: 0.3,
+          yAxisID: 'y2', order: 1,
         },
       ],
     },
@@ -1280,9 +1298,20 @@ function renderEmptyShelfChart(primary, comparison, assets) {
         legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
         tooltip: {
           callbacks: {
-            label: c => c.dataset.label === 'Empty SoS %'
-              ? `Empty SoS: ${fmtPct(c.parsed.y)}`
-              : `Actual Rev: ${fmtMoneyFull(c.parsed.y)}`,
+            title: items => items[0].label,
+            label: c => {
+              if (c.dataset.label === 'Empty SoS %')  return `  Empty SoS: ${fmtPct(c.parsed.y)}`;
+              if (c.dataset.label === 'Avg OOS Days') return `  Avg OOS Days: ${fmtNum(c.parsed.y, 1)}d`;
+              return '';
+            },
+            afterBody: items => {
+              const row = arr[items[0].dataIndex];
+              if (!row) return [];
+              return [
+                `  Missed Revenue: ${fmtMoneyFull(row.missedRev)}`,
+                `  Assets: ${row.assetCount.toLocaleString()}`,
+              ];
+            },
           },
         },
       },
@@ -1294,31 +1323,55 @@ function renderEmptyShelfChart(primary, comparison, assets) {
         },
         y2: {
           type: 'linear', position: 'right',
-          ticks: { callback: v => fmtMoney(v) }, grid: { display: false },
-          title: { display: true, text: 'Actual Revenue', color: '#1A29B6', font: { size: 10, weight: '600' } },
+          beginAtZero: true,
+          ticks: { callback: v => fmtNum(v, 1) + 'd' }, grid: { display: false },
+          title: { display: true, text: 'Avg OOS Days', color: '#1A29B6', font: { size: 10, weight: '600' } },
         },
         x: { ticks: { font: { size: 10 }, maxRotation: 60, minRotation: 30 }, grid: { display: false } },
       },
     },
   });
+
+  // Executive insight note
+  const note = document.getElementById('chEmptyNote');
+  if (note) note.textContent = 'High Empty SoS paired with high Avg OOS Days indicates distributors where shelf space is staying empty long enough to create sustained lost selling opportunities.';
 }
 
 function renderFSOSChart(assets, rows) {
   const el = document.getElementById('chFSOS'); if (!el) return;
   destroyChart('chFSOS');
   if (!assets.length) { el.parentElement.innerHTML = '<div class="empty-state">No Asset Performance data uploaded.</div>'; return; }
+
+  // Build per-distributor Foreign SoS from asset performance data
   const distMap = {};
   assets.forEach(a => {
     if (!distMap[a.distributor]) distMap[a.distributor] = { sum: 0, n: 0 };
     distMap[a.distributor].sum += a.foreignSoS;
     distMap[a.distributor].n += 1;
   });
-  const actualByDist = {};
-  (rows || []).forEach(r => { actualByDist[r.distributor] = (actualByDist[r.distributor] || 0) + r.actualRev; });
+
+  // Build per-distributor Missed Revenue % and raw values from MO data
+  const revByDist = {};
+  (rows || []).forEach(r => {
+    if (!revByDist[r.distributor]) revByDist[r.distributor] = { missed: 0, actual: 0 };
+    revByDist[r.distributor].missed += r.missedRev;
+    revByDist[r.distributor].actual += r.actualRev;
+  });
 
   const arr = Object.entries(distMap)
-    .map(([k, v]) => ({ dist: k, sos: v.sum / v.n, actual: actualByDist[k] || 0 }))
-    .sort((a, b) => b.sos - a.sos).slice(0, 12);
+    .map(([k, v]) => {
+      const rev = revByDist[k] || { missed: 0, actual: 0 };
+      return {
+        dist:           k,
+        sos:            v.sum / v.n,
+        missedRevPct:   calcMissedRevPct(rev.missed, rev.actual),
+        missedRev:      rev.missed,
+        actualRev:      rev.actual,
+        assetCount:     v.n,
+      };
+    })
+    .sort((a, b) => b.sos - a.sos)
+    .slice(0, 12);
 
   const ctx = el.getContext('2d');
   state.charts.chFSOS = new Chart(ctx, {
@@ -1330,23 +1383,18 @@ function renderFSOSChart(assets, rows) {
           label: 'Foreign SoS %',
           data: arr.map(s => +s.sos.toFixed(2)),
           backgroundColor: '#9F36C4',
-          borderRadius: 3,
-          yAxisID: 'y',
-          order: 2,
+          borderRadius: 3, yAxisID: 'y', order: 2,
         },
         {
-          label: 'Actual Revenue',
-          data: arr.map(s => s.actual),
+          label: 'Missed Revenue %',
+          data: arr.map(s => +s.missedRevPct.toFixed(1)),
           type: 'line',
           borderColor: '#1A29B6',
           backgroundColor: 'rgba(26,41,182,0.08)',
           pointBackgroundColor: '#1A29B6',
-          pointRadius: 4,
-          borderWidth: 2,
-          fill: false,
-          tension: 0.3,
-          yAxisID: 'y2',
-          order: 1,
+          pointRadius: 4, borderWidth: 2,
+          fill: false, tension: 0.3,
+          yAxisID: 'y2', order: 1,
         },
       ],
     },
@@ -1362,9 +1410,21 @@ function renderFSOSChart(assets, rows) {
         legend: { display: true, position: 'top', labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } },
         tooltip: {
           callbacks: {
-            label: c => c.dataset.label === 'Foreign SoS %'
-              ? `Foreign SoS: ${fmtPct(c.parsed.y)}`
-              : `Actual Rev: ${fmtMoneyFull(c.parsed.y)}`,
+            title: items => items[0].label,
+            label: c => {
+              if (c.dataset.label === 'Foreign SoS %')    return `  Foreign SoS: ${fmtPct(c.parsed.y)}`;
+              if (c.dataset.label === 'Missed Revenue %') return `  Missed Revenue %: ${fmtNum(c.parsed.y, 1)}%`;
+              return '';
+            },
+            afterBody: items => {
+              const row = arr[items[0].dataIndex];
+              if (!row) return [];
+              return [
+                `  Missed Revenue: ${fmtMoneyFull(row.missedRev)}`,
+                `  Actual Revenue: ${fmtMoneyFull(row.actualRev)}`,
+                `  Assets: ${row.assetCount.toLocaleString()}`,
+              ];
+            },
           },
         },
       },
@@ -1376,13 +1436,18 @@ function renderFSOSChart(assets, rows) {
         },
         y2: {
           type: 'linear', position: 'right',
-          ticks: { callback: v => fmtMoney(v) }, grid: { display: false },
-          title: { display: true, text: 'Actual Revenue', color: '#1A29B6', font: { size: 10, weight: '600' } },
+          beginAtZero: true, max: 100,
+          ticks: { callback: v => v + '%' }, grid: { display: false },
+          title: { display: true, text: 'Missed Revenue %', color: '#1A29B6', font: { size: 10, weight: '600' } },
         },
         x: { ticks: { font: { size: 10 }, maxRotation: 60, minRotation: 30 }, grid: { display: false } },
       },
     },
   });
+
+  // Executive insight note
+  const note = document.getElementById('chFSOSNote');
+  if (note) note.textContent = 'High Foreign SoS paired with high Missed Revenue % indicates distributors where foreign product presence may be crowding out MICC items and contributing to revenue leakage.';
 }
 
 function renderAssetHealthPanel(assets) {
