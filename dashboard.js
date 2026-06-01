@@ -1502,50 +1502,49 @@ function buildAssetDetailTable(assets, title) {
     wrap.innerHTML = '<div class="empty-state">No assets in this category.</div>';
     return wrap;
   }
-  const sorted = assets.slice().sort((a, b) => {
+
+  // Default sort: bad status first
+  const rows = assets.slice().sort((a, b) => {
     const rank = r => r.noCommunication ? 0 : r.noImage ? 1 : r.noDoor ? 2 : 3;
     return rank(a) - rank(b);
   });
+
   const hdrRow = document.createElement('div');
   hdrRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
   const hdr = document.createElement('div');
   hdr.className = 'muted small';
-  hdr.textContent = `${sorted.length.toLocaleString()} asset${sorted.length !== 1 ? 's' : ''} — click any row for full detail`;
+  hdr.textContent = `${rows.length.toLocaleString()} asset${rows.length !== 1 ? 's' : ''} — click any row for full detail`;
   hdrRow.appendChild(hdr);
-  // Export button added here — modal's auto-wiring also catches it, but this ensures correct filename
-  const expBtn = exportBtn('Export CSV', () => tbl, safeFilename(title || 'assets'));
-  hdrRow.appendChild(expBtn);
   wrap.appendChild(hdrRow);
-  const tblWrap = document.createElement('div'); tblWrap.className = 'tbl-wrap';
-  const tbl = document.createElement('table'); tbl.className = 'tbl';
-  tbl.innerHTML = `<thead><tr>
-    <th>Outlet</th><th>Outlet Code</th><th>Distributor</th>
-    <th>Asset Serial</th><th>Camera</th><th>Status</th>
-    <th>Last Image</th><th>Last Ping</th>
-    <th class="num">Empty SoS</th><th class="num">Foreign SoS</th>
-    <th>Diagnosis</th>
-  </tr></thead>`;
-  const tb = document.createElement('tbody');
-  sorted.forEach(a => {
-    const tr = document.createElement('tr');
-    tr.className = 'expandable';
-    tr.innerHTML = `
-      <td><b>${a.outlet || '—'}</b></td>
-      <td class="tight">${a.outletCode || '—'}</td>
-      <td>${a.distributor || '—'}</td>
-      <td class="tight">${a.asset || '—'}</td>
-      <td>${a.cabinetType || '—'}</td>
-      <td>${statusPill(a.status)}</td>
-      <td class="tight">${fmtDate(a.lastImg)}</td>
-      <td class="tight">${fmtDate(a.devicePing)}</td>
-      <td class="num${a.emptySoS > 20 ? ' warn' : ''}">${fmtPct(a.emptySoS)}</td>
-      <td class="num${a.foreignSoS > 20 ? ' warn' : ''}">${fmtPct(a.foreignSoS)}</td>
-      <td style="font-size:11px">${a.diagnosis || '—'}</td>
-    `;
-    tr.addEventListener('click', () => openAssetDetail(a));
-    tb.appendChild(tr);
-  });
-  tbl.appendChild(tb); tblWrap.appendChild(tbl); wrap.appendChild(tblWrap);
+
+  // Flatten date fields to strings so sorting works on them
+  const flat = rows.map(a => ({
+    ...a,
+    lastImgStr:  fmtDate(a.lastImg),
+    lastPingStr: fmtDate(a.devicePing),
+  }));
+
+  const cols = [
+    { h: 'Outlet',       k: 'outlet',      fmt: v => `<b>${v||'—'}</b>` },
+    { h: 'Outlet Code',  k: 'outletCode',  cls: 'tight' },
+    { h: 'Distributor',  k: 'distributor' },
+    { h: 'Asset Serial', k: 'asset',       cls: 'tight' },
+    { h: 'Camera',       k: 'cabinetType' },
+    { h: 'Status',       k: 'status',      fmt: v => statusPill(v) },
+    { h: 'Last Image',   k: 'lastImgStr',  cls: 'tight' },
+    { h: 'Last Ping',    k: 'lastPingStr', cls: 'tight' },
+    { h: 'Empty SoS',    k: 'emptySoS',    cls: 'num',   fmt: v => `<span class="${v>20?'warn':''}">${fmtPct(v)}</span>` },
+    { h: 'Foreign SoS',  k: 'foreignSoS',  cls: 'num',   fmt: v => `<span class="${v>20?'warn':''}">${fmtPct(v)}</span>` },
+    { h: 'Diagnosis',    k: 'diagnosis',   fmt: v => `<span style="font-size:11px">${v||'—'}</span>` },
+  ];
+
+  const tbl = buildDrillTable('assetDetailTbl', flat, cols, row => openAssetDetail(row));
+  wrap.appendChild(tbl);
+
+  // Export button — added after table so it can reference it
+  const expBtn = exportBtn('Export CSV', () => document.getElementById('assetDetailTbl'), safeFilename(title || 'assets'));
+  hdrRow.appendChild(expBtn);
+
   return wrap;
 }
 
