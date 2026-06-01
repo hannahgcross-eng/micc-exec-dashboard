@@ -1667,9 +1667,9 @@ function buildTable(tblId, rows, cols, expandable=false) {
   const trH = document.createElement('tr');
   cols.forEach(c => {
     const th = document.createElement('th');
-    th.innerHTML = `${c.h}<span class="sort-ind"></span>`;
+    th.innerHTML = `${c.h}<span class="sort-ind">⇅</span>`;
     if (c.cls && c.cls.indexOf('num') >= 0) th.classList.add('num');
-    th.style.cursor='pointer'; th.style.userSelect='none';
+    th.title = `Sort by ${c.h}`;
     th.addEventListener('click', () => sortTable(tblId, rows, cols, c.k, t));
     trH.appendChild(th);
   });
@@ -1706,7 +1706,9 @@ function sortTable(tblId, rows, cols, key, t) {
   // Update sort indicators
   t.querySelectorAll('thead th').forEach((th, i) => {
     const ind = th.querySelector('.sort-ind');
-    if (ind) ind.textContent = (cols[i] && cols[i].k === key) ? (dir === -1 ? ' ▼' : ' ▲') : '';
+    const isActive = cols[i] && cols[i].k === key;
+    th.classList.toggle('sort-active', isActive);
+    if (ind) ind.textContent = isActive ? (dir === -1 ? '▼' : '▲') : '⇅';
   });
   // re-render body
   const oldTbody = t.querySelector('tbody');
@@ -2009,9 +2011,9 @@ function buildTableWithExpand(tblId, rows, cols, expandBuilder) {
   const trH = document.createElement('tr');
   cols.forEach(c => {
     const th = document.createElement('th');
-    th.innerHTML = `${c.h}<span class="sort-ind"></span>`;
+    th.innerHTML = `${c.h}<span class="sort-ind">⇅</span>`;
     if (c.cls && c.cls.indexOf('num') >= 0) th.classList.add('num');
-    th.style.cursor='pointer'; th.style.userSelect='none';
+    th.title = `Sort by ${c.h}`;
     th.addEventListener('click', () => sortGenericTable(rows, cols, c.k, t, expandBuilder));
     trH.appendChild(th);
   });
@@ -2052,7 +2054,9 @@ function sortGenericTable(rows, cols, key, t, expandBuilder) {
   // Update sort indicators
   t.querySelectorAll('thead th').forEach((th, i) => {
     const ind = th.querySelector('.sort-ind');
-    if (ind) ind.textContent = (cols[i] && cols[i].k === key) ? (dir === -1 ? ' ▼' : ' ▲') : '';
+    const isActive = cols[i] && cols[i].k === key;
+    th.classList.toggle('sort-active', isActive);
+    if (ind) ind.textContent = isActive ? (dir === -1 ? '▼' : '▲') : '⇅';
   });
   const oldTbody = t.querySelector('tbody');
   const newTbody = document.createElement('tbody');
@@ -2579,9 +2583,9 @@ function buildDrillTable(id, rows, cols, onRowClick) {
 
   cols.forEach(c => {
     const th = document.createElement('th');
-    th.innerHTML = `${c.h}<span class="sort-ind"></span>`;
+    th.innerHTML = `${c.h}<span class="sort-ind">⇅</span>`;
     if (c.cls && c.cls.includes('num')) th.classList.add('num');
-    th.style.cursor = 'pointer'; th.style.userSelect = 'none';
+    th.title = `Sort by ${c.h}`;
     th.addEventListener('click', () => {
       const dir = localSort.key === c.k ? -localSort.dir : -1;
       localSort.key = c.k; localSort.dir = dir;
@@ -2590,8 +2594,12 @@ function buildDrillTable(id, rows, cols, onRowClick) {
         if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
         return String(va || '').localeCompare(String(vb || '')) * dir;
       });
-      trH.querySelectorAll('.sort-ind').forEach(s => s.textContent = '');
-      th.querySelector('.sort-ind').textContent = dir === -1 ? ' ▼' : ' ▲';
+      trH.querySelectorAll('th').forEach(h => {
+        h.classList.remove('sort-active');
+        const s = h.querySelector('.sort-ind'); if (s) s.textContent = '⇅';
+      });
+      th.classList.add('sort-active');
+      th.querySelector('.sort-ind').textContent = dir === -1 ? '▼' : '▲';
       rebuildBody();
       // Re-wire export button with current sort
       const expBtn = document.getElementById('modalExportBtn');
