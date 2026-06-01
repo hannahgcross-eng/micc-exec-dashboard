@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MICC USA — Playbook Executive & Distributor Dashboard</title>
+<link rel="stylesheet" href="dashboard.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<!-- ============== TOPBAR ============== -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">MU</div>
+    <div class="brand-text">MICC <span>USA</span> · Playbook Dashboard</div>
+  </div>
+  <div class="meta" id="topMeta" style="display:none">Live Playbook data</div>
+  <div class="right" id="topRight" style="display:none">
+    <span class="badge-sample" id="sampleBadge" style="display:none">SAMPLE DATA</span>
+    <span class="badge-live" id="liveBadge" style="display:none">LIVE PLAYBOOK</span>
+    <div class="view-toggle">
+      <button data-view="executive" class="active">Executive</button>
+      <button data-view="distributor">Distributor</button>
+    </div>
+    <button class="btn ghost" id="exitBtn">↺ Re-upload</button>
+  </div>
+</div>
+
+<!-- ============== LANDING / UPLOAD ============== -->
+<div class="landing" id="landing">
+  <div class="landing-inner">
+    <div class="accent-line"></div>
+    <h1>Playbook Executive &amp; Distributor Dashboard</h1>
+    <p class="lede">Upload your Playbook <b>Missed Opportunity</b> and <b>Asset Performance</b> exports to generate an interactive executive and distributor view. All KPIs use Playbook field definitions only — no inferred or weighted scores.</p>
+
+    <div class="upload-grid">
+      <div class="upload-card">
+        <h3>Missed Opportunity <span class="pill">.xlsx · .csv</span></h3>
+        <div class="descr">Outlet × SKU × Asset rows with OOS Days, Missed Revenue, Actual Revenue, Potential Revenue, Cases, Units, Pricing, Planogram, Route.</div>
+        <div class="dropzone" id="moDrop">
+          <div class="icn">⬆</div>
+          <div class="main-text">Drag &amp; drop Missed Opportunity files</div>
+          <div class="sub-text">or click to browse · multiple months supported</div>
+        </div>
+        <input type="file" id="moDrop-input" multiple accept=".xlsx,.xlsm,.csv,.tsv" hidden>
+        <div class="file-list" id="moFiles"></div>
+        <div class="muted small" style="margin-top:6px" id="moCount"></div>
+      </div>
+      <div class="upload-card">
+        <h3>Asset Performance <span class="pill">.xlsx · .csv</span></h3>
+        <div class="descr">Asset-level Empty SoS, Foreign SoS, Status (No Image / No Communication / No Door), rolling-day image activity, Camera/Hardware type.</div>
+        <div class="dropzone" id="apDrop">
+          <div class="icn">⬆</div>
+          <div class="main-text">Drag &amp; drop Asset Performance files</div>
+          <div class="sub-text">or click to browse</div>
+        </div>
+        <input type="file" id="apDrop-input" multiple accept=".xlsx,.xlsm,.csv,.tsv" hidden>
+        <div class="file-list" id="apFiles"></div>
+        <div class="muted small" style="margin-top:6px" id="apCount"></div>
+      </div>
+    </div>
+
+    <div class="landing-actions">
+      <button class="generate-btn" id="generateBtn">Generate dashboard ▸</button>
+      <button class="sample-btn" id="useSampleBtn">Use sample data (Playbook-shaped)</button>
+    </div>
+
+    <div class="landing-footer">
+      <span><span class="dot"></span>Empty SoS = Empty Facings ÷ Total Facings × 100</span>
+      <span><span class="dot"></span>Foreign SoS = Foreign Facings ÷ Total Facings × 100</span>
+      <span><span class="dot"></span>Avg Days SKU OOS / Product = mean OOS Days field</span>
+      <span><span class="dot"></span>Missed Revenue, Actual Revenue, Potential Revenue from Playbook export</span>
+      <span><span class="dot"></span>No weighted scores · No invented KPIs · No AI recommendations</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============== MAIN APP ============== -->
+<div id="mainApp" style="display:none">
+
+  <!-- Filter Bar -->
+  <div class="filter-bar">
+    <div class="fb-group">
+      <label>Period</label>
+      <select id="fPeriod"></select>
+    </div>
+    <div class="fb-custom-range" id="periodCustomRange" style="display:none">
+      <select id="fPeriodFrom" title="From month"></select>
+      <span class="fb-arrow">→</span>
+      <select id="fPeriodTo" title="To month"></select>
+    </div>
+    <div class="fb-group">
+      <label>Compare to</label>
+      <select id="fCompare"></select>
+    </div>
+    <div class="fb-custom-range" id="compareCustomRange" style="display:none">
+      <select id="fCompareFrom" title="From month"></select>
+      <span class="fb-arrow">→</span>
+      <select id="fCompareTo" title="To month"></select>
+    </div>
+    <div class="period-info-chip" id="periodInfoChip" style="display:none"></div>
+    <div class="fb-group">
+      <label>Distributor</label>
+      <select id="fDistributor"></select>
+    </div>
+    <div class="fb-group">
+      <label>Market</label>
+      <select id="fMarket"></select>
+    </div>
+    <div class="fb-group">
+      <label>Channel</label>
+      <select id="fChannel"></select>
+    </div>
+    <div class="fb-group">
+      <label>Classification</label>
+      <select id="fClassification"></select>
+    </div>
+    <div class="fb-group">
+      <label>Route</label>
+      <select id="fRoute"></select>
+    </div>
+    <div class="fb-group">
+      <label>Outlet</label>
+      <select id="fOutlet"></select>
+    </div>
+    <div class="fb-group">
+      <label>Product</label>
+      <select id="fProduct"></select>
+    </div>
+    <div class="fb-group">
+      <label>Camera</label>
+      <select id="fCameraType"></select>
+    </div>
+    <div class="fb-group">
+      <label>Asset Status</label>
+      <select id="fAssetStatus"></select>
+    </div>
+    <button class="clear-filters" id="clearFiltersBtn">Clear filters</button>
+  </div>
+
+  <!-- ============== EXECUTIVE VIEW ============== -->
+  <div class="container" id="execView">
+
+    <div class="section">
+      <div class="section-head">
+        <h2>Executive snapshot</h2>
+        <div class="descr">All KPIs sourced from Playbook export fields. Click a tile for drill-down.</div>
+      </div>
+      <div class="kpi-grid compact" id="execKPIs"></div>
+    </div>
+
+    <div class="section">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h3>Top distributors — Missed Revenue</h3>
+            <div class="descr">SUM(Missed Revenue) in selected period</div>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chTopDist"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Empty Share of Shelf by distributor</h3>
+            <div class="descr">Mean of Empty SoS field across assets</div>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chEmpty"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h3>Foreign Share of Shelf by distributor</h3>
+            <div class="descr">Mean of Foreign SoS field across assets</div>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chFSOS"></canvas></div>
+        </div>
+        <div class="card" id="tpcCard"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="card">
+        <div class="card-head outlet-card-head">
+          <div>
+            <h3>Asset Performance health</h3>
+            <div class="descr">Click any stat tile to see outlet-level detail · Red = No Communication · Orange = No Image · Gray = No Door</div>
+          </div>
+          <div class="outlet-view-toggle" id="assetViewToggle">
+            <button data-asset-view="grid" class="active">⊞ Grid</button>
+            <button data-asset-view="map">⊙ Network Map</button>
+          </div>
+        </div>
+        <div class="grid-3" style="margin-bottom:14px">
+          <div class="rc-fact rc-clickable" id="apTile-all"><div class="lbl">Total Installed Assets</div><div class="val" id="apTotalAssets">—</div><div class="rc-drill">View all ▸</div></div>
+          <div class="rc-fact rc-clickable" id="apTile-nocomm"><div class="lbl">No Communication</div><div class="val" id="apNoComm" style="color:var(--red)">—</div><div class="rc-drill">View outlets ▸</div></div>
+          <div class="rc-fact rc-clickable" id="apTile-noimage"><div class="lbl">No Image</div><div class="val" id="apNoImage" style="color:var(--orange)">—</div><div class="rc-drill">View outlets ▸</div></div>
+          <div class="rc-fact rc-clickable" id="apTile-nodoor"><div class="lbl">No Door</div><div class="val" id="apNoDoor" style="color:var(--text-2)">—</div><div class="rc-drill">View outlets ▸</div></div>
+          <div class="rc-fact rc-clickable" id="apTile-oem"><div class="lbl">OEM cameras</div><div class="val" id="apOEM">—</div><div class="rc-drill">View outlets ▸</div></div>
+          <div class="rc-fact rc-clickable" id="apTile-retrofit"><div class="lbl">Retrofit cameras</div><div class="val" id="apRetrofit">—</div><div class="rc-drill">View outlets ▸</div></div>
+        </div>
+        <div id="assetGridWrap">
+          <div class="asset-matrix" id="assetMatrix"></div>
+        </div>
+        <div id="assetMapWrap" style="display:none">
+          <div id="assetMap"></div>
+          <div class="outlet-map-legend" id="assetMapLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="card">
+        <div class="card-head">
+          <h3>Missed Revenue detail · top 300 SKU-asset rows</h3>
+          <div class="descr">Click a row to expand · Sort by any column</div>
+        </div>
+        <div id="missedRevTblWrap"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="grid-2-1">
+        <div class="card">
+          <div class="card-head">
+            <h3>Root cause relationship panel</h3>
+            <div class="descr">Related Playbook factors for current selection — no causal inferences</div>
+          </div>
+          <div id="rcPanel" class="rc-panel"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Before / after comparison</h3>
+            <div class="descr">Selected period vs comparison period</div>
+          </div>
+          <div id="beforeAfter"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============== DISTRIBUTOR VIEW ============== -->
+  <div class="container" id="distView" style="display:none">
+
+    <div class="section">
+      <div class="card">
+        <div class="card-head outlet-card-head">
+          <div>
+            <h3>Outlet priority detail</h3>
+            <div class="descr" id="outletCardDescr">Ranked by Missed Revenue · click any outlet to see SKU detail and rolling 7-day image activity</div>
+          </div>
+          <div class="outlet-view-toggle" id="outletViewToggle" style="display:none">
+            <button data-outlet-view="table" class="active">⊞ Table</button>
+            <button data-outlet-view="map">⊙ Map</button>
+          </div>
+        </div>
+        <div id="outletPriorityWrap"></div>
+        <div id="outletMapWrap" style="display:none">
+          <div id="outletMap"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="card">
+        <div class="card-head">
+          <h3>Route view</h3>
+          <div class="descr">Aggregated by Route field from Playbook Missed Opportunity export</div>
+        </div>
+        <div id="routeViewWrap"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="card">
+        <div class="card-head">
+          <h3>MOQ / MOV threshold analysis</h3>
+          <div class="descr">Configurable — enter your distributor's thresholds to identify bundled service opportunities</div>
+        </div>
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:10px 14px;margin-bottom:12px">
+          <div class="threshold-input"><label>Outlet-level MOV ($)</label><input type="number" id="movInput" value="250" min="0" step="10"></div>
+          <div class="threshold-input"><label>Route-level MOV ($)</label><input type="number" id="routeMovInput" value="1000" min="0" step="50"></div>
+          <div class="threshold-note">Thresholds are user-configured here. To apply per-distributor or per-product thresholds, upload a thresholds file (not yet detected in current data).</div>
+        </div>
+        <div class="moq-grid">
+          <div>
+            <h4 style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:6px">Outlets below MOV (individual service not justified)</h4>
+            <div id="moqOutlets"></div>
+          </div>
+          <div>
+            <h4 style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:6px">Routes above bundled MOV (route service may be justified)</h4>
+            <div id="movRoutes"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ============== MODAL ============== -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">Drill-down</h3>
+      <div class="close" id="modalClose">✕</div>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+  // Show topbar right side after boot
+  const origBoot = window.boot;
+  window.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.view-toggle button').forEach(b => {
+      b.addEventListener('click', () => {
+        document.getElementById('topRight').style.display = 'flex';
+      });
+    });
+  });
+</script>
+<script src="dashboard.js"></script>
+<script>
+  // After boot, reveal topbar controls
+  const origBootFn = boot;
+  boot = function() {
+    origBootFn();
+    document.getElementById('topRight').style.display = 'flex';
+    document.getElementById('topMeta').style.display = state.isSample ? 'none' : 'block';
+  };
+</script>
+</body>
+</html>
