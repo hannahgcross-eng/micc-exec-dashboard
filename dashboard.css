@@ -427,6 +427,31 @@ input,select{font-family:inherit;font-size:13px}
   opacity:0;transition:opacity .15s;
 }
 .rc-clickable:hover .rc-drill{opacity:1;color:var(--primary)}
+.rc-clickable.map-filter-active{
+  border-color:var(--primary)!important;
+  background:rgba(26,41,182,0.05)!important;
+  box-shadow:0 0 0 2px rgba(26,41,182,0.18)!important;
+}
+.rc-clickable.map-filter-active::after{
+  content:"⊙ on map";position:absolute;top:8px;right:8px;
+  font-size:9.5px;font-weight:700;color:var(--primary);
+  background:rgba(26,41,182,0.10);padding:2px 6px;border-radius:8px;
+}
+.map-active-filter-chip{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 12px;margin-bottom:8px;
+  background:rgba(26,41,182,0.07);
+  border:1px solid rgba(26,41,182,0.2);border-radius:7px;
+  font-size:12px;color:var(--text-2);
+}
+.map-active-filter-chip b{color:var(--primary)}
+.chip-clear-btn{
+  background:transparent;border:1px solid var(--border-2);
+  border-radius:5px;padding:2px 8px;font-size:11px;
+  color:var(--text-mute);cursor:pointer;margin-left:4px;
+  transition:background .12s;
+}
+.chip-clear-btn:hover{background:var(--border);color:var(--text)}
 
 #assetMap{
   height:560px;border-radius:8px;

@@ -241,6 +241,7 @@ const state = {
   charts: {},
   assetLeafletMap: null,
   currentAssets: [],
+  assetMapFilter: null,      // null = all; 'nocomm'|'noimage'|'nodoor'|'oem'|'retrofit'
   outletLeafletMap: null,
   currentOutletList: [],
   pd: { view: 'breakdown-rev', productFilter: '__all__' },
@@ -732,11 +733,14 @@ function parseFile(file) {
         continue;
       }
 
+      // Compute per-sheet month label: sheet name takes priority over file name
+      const sheetMonthLabel = inferMonthLabelForSheet(sheetName, monthLabel);
+
       let rowsAdded = 0;
       if (kind === FIELD_KIND.MISSED_OPP) {
         for (let r = 1; r < json.length; r++) {
           if (!json[r] || !json[r][idx.client]) continue;
-          state.missedOpp.push(normMORow(json[r], idx, monthLabel));
+          state.missedOpp.push(normMORow(json[r], idx, sheetMonthLabel));
           rowsAdded++;
         }
       } else if (kind === FIELD_KIND.ASSET_PERF) {
@@ -831,6 +835,35 @@ function updateFilePill(name, kindLabel, rowCount, detectedKind) {
     }
   });
 }
+// Per-sheet month label: try sheet name first, fall back to file-level label.
+// Handles workbooks where each tab = one month (e.g. "January", "Jan 2025", "2025-01").
+function inferMonthLabelForSheet(sheetName, fileMonthLabel) {
+  // 1. Try sheet name with a full "Month YYYY" pattern
+  const fromSheet = inferMonthLabel(sheetName);
+  if (fromSheet !== 'Uploaded') return fromSheet;
+
+  // 2. Sheet name is just a month word (no year) — e.g. "January", "Feb", "March"
+  const MONTH_NAMES = /^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s*(\d{4})?$/i;
+  const m = String(sheetName || '').trim().match(MONTH_NAMES);
+  if (m) {
+    const abbr = capitalize(m[1].slice(0, 3));
+    const yr   = m[2] || (fileMonthLabel.match(/\d{4}/) || [])[0];
+    if (yr) return `${abbr} ${yr}`;
+  }
+
+  // 3. Sheet name is a number like "1", "01" → treat as month index using year from file label
+  const numSheet = String(sheetName || '').trim().match(/^(0?[1-9]|1[0-2])$/);
+  if (numSheet) {
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const abbr = MONTHS[parseInt(numSheet[1], 10) - 1];
+    const yr   = (fileMonthLabel.match(/\d{4}/) || [])[0];
+    if (abbr && yr) return `${abbr} ${yr}`;
+  }
+
+  // 4. Fall back to whatever we got from the filename
+  return fileMonthLabel;
+}
+
 function inferMonthLabel(name) {
   // Handles patterns like:
   //   MICC_MO_ALL_April_2026_PB_Export.xlsx       -> "April 2026"
@@ -1450,6 +1483,27 @@ function renderFSOSChart(assets, rows) {
   if (note) note.textContent = 'High Foreign SoS paired with high Missed Revenue % indicates distributors where foreign product presence may be crowding out MICC items and contributing to revenue leakage.';
 }
 
+// Asset tile filter map — keyed by the suffix after "apTile-"
+const ASSET_TILE_FILTERS = {
+  all:      () => true,
+  nocomm:   a => a.noCommunication,
+  noimage:  a => a.noImage,
+  nodoor:   a => a.noDoor,
+  oem:      a => String(a.cabinetType).toUpperCase() === 'OEM',
+  retrofit: a => String(a.cabinetType).toUpperCase() === 'RETROFIT',
+};
+const ASSET_TILE_LABELS = {
+  all:'All Assets', nocomm:'No Communication', noimage:'No Image',
+  nodoor:'No Door', oem:'OEM Cameras', retrofit:'Retrofit Cameras',
+};
+
+function clearAssetMapFilter() {
+  state.assetMapFilter = null;
+  document.querySelectorAll('.rc-clickable').forEach(t => t.classList.remove('map-filter-active'));
+  const mapWrap = document.getElementById('assetMapWrap');
+  if (mapWrap && mapWrap.style.display !== 'none') renderAssetMap(state.currentAssets || []);
+}
+
 function renderAssetHealthPanel(assets) {
   state.currentAssets = assets;
   const el = document.getElementById('assetMatrix');
@@ -1501,10 +1555,31 @@ function renderAssetHealthPanel(assets) {
     // Remove old listener by cloning
     const fresh = tile.cloneNode(true);
     tile.parentNode.replaceChild(fresh, tile);
-    // Re-set value (cloneNode copies the DOM, value already set above — refresh)
+    // Re-set value after cloneNode
     const v = fresh.querySelector(`#${cfg.val}`);
     if (v) v.textContent = cfg.count.toLocaleString();
+    // Re-apply map filter active state if this tile is the current filter
+    const filterKey = tileId.replace('apTile-', '');
+    if (state.assetMapFilter === filterKey) fresh.classList.add('map-filter-active');
+
     fresh.addEventListener('click', () => {
+      // Toggle map filter on/off
+      const wasActive = state.assetMapFilter === filterKey;
+      state.assetMapFilter = wasActive ? null : filterKey;
+
+      // Update visual state on all tiles
+      document.querySelectorAll('.rc-clickable').forEach(t => t.classList.remove('map-filter-active'));
+      if (!wasActive && filterKey !== 'all') fresh.classList.add('map-filter-active');
+
+      // If map is currently visible, update it immediately
+      const mapWrap = document.getElementById('assetMapWrap');
+      if (mapWrap && mapWrap.style.display !== 'none') {
+        const fn = ASSET_TILE_FILTERS[state.assetMapFilter] || (() => true);
+        renderAssetMap((state.currentAssets || []).filter(fn));
+        setTimeout(() => { if (state.assetLeafletMap) state.assetLeafletMap.invalidateSize(); }, 80);
+      }
+
+      // Open the detail table modal (existing behaviour)
       openDrill(cfg.label, () => buildAssetDetailTable(assets.filter(cfg.filter), cfg.label));
     });
   });
@@ -1618,6 +1693,24 @@ async function renderAssetMap(assets) {
   if (!el) return;
 
   if (state.assetLeafletMap) { state.assetLeafletMap.remove(); state.assetLeafletMap = null; }
+
+  // Show / clear the active filter chip above the map
+  const chipId = 'assetMapFilterChip';
+  let chip = document.getElementById(chipId);
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.id = chipId;
+    el.parentElement.insertBefore(chip, el);
+  }
+  if (state.assetMapFilter && state.assetMapFilter !== 'all') {
+    chip.className = 'map-active-filter-chip';
+    chip.innerHTML = `Showing: <b>${ASSET_TILE_LABELS[state.assetMapFilter] || state.assetMapFilter}</b> assets only
+      &nbsp;<button class="chip-clear-btn" title="Show all assets">✕ Clear filter</button>`;
+    chip.querySelector('.chip-clear-btn').onclick = () => clearAssetMapFilter();
+  } else {
+    chip.innerHTML = '';
+    chip.className = '';
+  }
 
   let positioned = assets.filter(a => a.lat != null && a.lon != null);
 
@@ -3124,7 +3217,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (view === 'map') {
         if (gridWrap) gridWrap.style.display = 'none';
         if (mapWrap)  mapWrap.style.display  = 'block';
-        renderAssetMap(state.currentAssets || []);
+        const fn = ASSET_TILE_FILTERS[state.assetMapFilter] || (() => true);
+        renderAssetMap((state.currentAssets || []).filter(fn));
         setTimeout(() => { if (state.assetLeafletMap) state.assetLeafletMap.invalidateSize(); }, 120);
       } else {
         if (gridWrap) gridWrap.style.display = 'block';
